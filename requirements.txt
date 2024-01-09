@@ -1,0 +1,9 @@
+configparser
+torch
+numpy
+math
+pywt
+pandas
+trimesh
+libigl
+

@@ -1,0 +1,1 @@
+Optional folder for other activities
