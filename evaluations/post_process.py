@@ -2,7 +2,6 @@ import pandas as pd
 import torch
 import trimesh
 import os
-from torch.cuda.amp import autocast
 from skimage.measure import marching_cubes
 import numpy as np
 import igl
@@ -14,71 +13,13 @@ import pickle
 import time
 from models import ImplicitNet
 import argparse
+from executor.executor import Executor
 
-def generate_coordinates(volume_size):
-    device = torch.device("cuda")
-    x = torch.linspace(-1, 1, volume_size[0], device=device)
-    xx, yy, zz = torch.meshgrid(x, x, x, indexing='ij')
-    coordinates = torch.stack((xx, yy, zz), dim=-1).reshape(-1, 3)
-    return coordinates
 
-def generate_sdf_values(model, coordinates, batch_size):
-    device = torch.device("cuda")
-    model.eval()
-    model.to(device)
-    sdf_values = []
-    with torch.no_grad():
-        for i in range(0, coordinates.shape[0], batch_size):
-            batch_coordinates = coordinates[i:i + batch_size]
-            batch_sdf = model(batch_coordinates)
-            sdf_values.append(batch_sdf)
-    sdf_values = torch.cat(sdf_values)
-    return sdf_values
 
-def extract_mesh(sdf_values, volume_size, cube_size):
-    spacing = (2/volume_size[0], 2/volume_size[0], 2/volume_size[0])
-    if cube_size == 256:
-        verts, faces, normals, _ = marching_cubes(sdf_values, level=0.0,spacing=spacing)
-        centroid = np.mean(verts)
-        verts -= centroid
-        mesh = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
-    else:
-        sdf_values_check = sdf_values[::256//cube_size, ::256//cube_size, ::256//cube_size]
-        verts_check, faces_check, normals_check, _ = marching_cubes(sdf_values_check, level=0.0,spacing=spacing)
-        centroid = np.mean(verts_check)
-        verts_check -= centroid
-        mesh = trimesh.Trimesh(vertices=verts_check, faces=faces_check)
-    return mesh
 
-def calculate_signed_distance(geometry_path, coordinates):
-    mesh = trimesh.load(geometry_path)
-    v, f = mesh.vertices, mesh.faces
-    S, I, C = igl.signed_distance(coordinates.cpu().numpy(), v, f, return_normals=False)
-    return S
 
-def calculate_loss(S, sdf_values):
-    mse_loss = nn.MSELoss()
-    loss = mse_loss(torch.FloatTensor(S), torch.FloatTensor(sdf_values.ravel()))
-    value_loss = loss/2
-    return value_loss
-
-def calculate_accuracy(S, sdf_values):
-    predicted_labels = np.sign(sdf_values)
-    actual_labels = np.sign(S)
-    accuracy = accuracy_score(actual_labels, predicted_labels)
-    return accuracy
-
-def generate_iteration_df(i, value_loss, accuracy):
-    iteration_df = pd.DataFrame({
-        'Iteration': [i],
-        'NMSELoss': [value_loss],
-        'Accuracy' :[accuracy]
-    })
-    return iteration_df
-
-def save_iteration_df(iteration_df, main_path):
-    iteration_df.to_csv( os.path.join(main_path,"results.csv"), mode='a', header=False, index=False)
-
+# helper Functions
 def generate_classification_report(actual_labels1, predicted_labels1, save_directory,key):
     class_report = classification_report(actual_labels1, predicted_labels1, output_dict=True)
     # Convert the classification report to a DataFrame
@@ -87,7 +28,6 @@ def generate_classification_report(actual_labels1, predicted_labels1, save_direc
     csv_filename = os.path.join(save_directory,f"classification_report{key}.csv")
     df.to_csv(csv_filename, index=True)
     print(f"Classification report saved to {csv_filename}")
-
 def generate_confusion_matrix(actual_labels, predicted_labels, save_directory,key):
     # Create a confusion matrix
     cm = confusion_matrix(y_true=actual_labels, y_pred=predicted_labels)
@@ -98,117 +38,50 @@ def generate_confusion_matrix(actual_labels, predicted_labels, save_directory,ke
     plt.ylabel("Actual Value")
     plt.savefig(os.path.join(save_directory, f"cm{key}.png"))
     plt.close()
-
-def generate_mismatching_coordinates(S, sdf_values, coordinates, threshold_low, threshold_high, save_directory):
-    actual_labels = np.sign(S)
-    predicted_labels = np.sign(sdf_values)
-    inside_range_indices = np.where((S >= threshold_low) & (S <= threshold_high))[0]
-    mismatching_coordinates = []
-    coordinates=coordinates.cpu().numpy()
-    for index in inside_range_indices:
-        if actual_labels[index] != predicted_labels[index]:
-            mismatching_coordinates.append(coordinates[index])
-    header_row = np.array([['x', 'y', 'z']])
-    mismatching_coordinates =np.array(mismatching_coordinates)
-    data_with_header = np.vstack((header_row, mismatching_coordinates))
-    csv_file_path = os.path.join(save_directory,'mismatching_co-ordinates.csv')
-    np.savetxt(csv_file_path, data_with_header, delimiter=',', fmt='%s')
-def reconstruct_mesh(save_directory,model_path,cube,num_hidden_layers,hidden_dim, geometry_path):
+# main function
+def post_process(executor:Executor):
+    if not isinstance(executor, Executor):
+        raise ValueError("executor must be an instance of Executor")
     
-    dims = [hidden_dim for i in range(num_hidden_layers)]
-    skip_in = [num_hidden_layers//2]
-    print(f"hidden dim is {num_hidden_layers}:{dims}")
-    model = ImplicitNet(d_in=3,dims=dims,skip_in=skip_in)
-    print(f"the skip in is {skip_in} ")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    i=200
-    path_chk=model_path
-    with open(path_chk, 'rb') as resume_file:
-            saved_data = pickle.load(resume_file)
-    epoch = saved_data['epoch']+1
-    print(f"....Loading model from epoch {epoch}...")
-    # Remove the "module." prefix
-    new_state_dict = {k.replace('module.', ''): v for k, v in saved_data['model_state_dict'].items()}
-
-    # Load the modified state_dict into your model
-    model.load_state_dict(new_state_dict)
-    model.eval()
-    if torch.cuda.device_count() > 1:
-        print("Let's use", torch.cuda.device_count(), "GPUs!")
-        model = torch.nn.DataParallel(model)
-    model.to(device)
-    volume_size = (cube, cube, cube)  # Adjust this based on your requirements
-    spacing = (2/volume_size[0], 2/volume_size[1], 2/volume_size[2])
-    torch.cuda.empty_cache()
-    x = torch.linspace(-1, 1, volume_size[0], device=device)
-    xx, yy, zz = torch.meshgrid(x, x, x, indexing='ij')
-    # Reshape the coordinates to create a DataFrame
-    coordinates = torch.stack((xx, yy, zz), dim=-1).reshape(-1, 3).to(device)
-    batch_size = 655360  # Adjust based on available memory
-    sdf_values = []
-    with torch.no_grad():
-        for i in range(0, coordinates.shape[0], batch_size):
-            batch_coordinates = coordinates[i:i + batch_size]
-            batch_sdf = model(batch_coordinates).to(torch.float32)
-            # type(batch_sdf)
-            sdf_values.append(batch_sdf)
-            batch_sdf = batch_sdf.ravel()
-
-    sdf_values = torch.cat(sdf_values)
-    # Reshape the SDF values array to match the volume shape
-    sdf_values = sdf_values.cpu().numpy().reshape(volume_size)
-    verts, faces, normals, _ = marching_cubes(sdf_values, level=0.0,spacing=spacing)
-    print(f"Mesh generated for cube size {cube}")
-    print(f"Saving mesh to {os.path.join(save_directory, f'{os.path.basename(geometry_path)}_resconstructed_{epoch}.stl')}")
-    mesh = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
-    mesh.export(os.path.join(save_directory, f"{os.path.basename(geometry_path)}_resconstructed_{epoch}_cube_{cube}.stl"), file_type='stl') 
-    # save the mesh
-    centroid = np.mean(verts)
-    verts -= centroid
-    # save the mesh
-    mesh = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
-    # mesh.export(os.path.join(save_directory, f"output_mesh{i}.stl"), file_type='stl')
-    print(f"Saving mesh to {os.path.join(save_directory, f'{os.path.basename(geometry_path)}_resconstructed_{epoch}.stl')}")
-    mesh.export(os.path.join(save_directory, f"{os.path.basename(geometry_path)}_resconstructed_{epoch}_cube_{cube}.stl"), file_type='stl') 
-def post_process(model,save_directory,geometry_path,num_points_uniform,num_points_surface,num_points_narrow_band,total_points,totalthreshold=0.01,second=None):
     start_time = time.time()
     try:
-        volume_size = (1024, 1024, 1024)  # Adjust this based on your requirements
+        volume_size = (executor.config.cubesize, executor.config.cubesize, executor.config.cubesize) 
         spacing = (2/volume_size[0], 2/volume_size[0], 2/volume_size[0])
-        device = torch.device("cuda")
+        device = executor.device
         torch.cuda.empty_cache()
         x = torch.linspace(-1, 1, volume_size[0], device=device)
         xx, yy, zz = torch.meshgrid(x, x, x, indexing='ij')
         # Reshape the coordinates to create a DataFrame
         coordinates = torch.stack((xx, yy, zz), dim=-1).reshape(-1, 3)
-        path_chk=os.path.join(save_directory, "best_model_epoch.pkl")            
-        with open(path_chk, 'rb') as resume_file:
-            saved_data = pickle.load(resume_file)
-        epoch = saved_data['epoch']+1
-        print(f"....Loading model from epoch {epoch}...")
-        model.load_state_dict(saved_data['model_state_dict'])
-        model.eval()
-        model.to(device)
-        mesh = trimesh.load(geometry_path)
+        # Load the model
+        model = executor.model
+        optimizer = torch.optim.Adam(model.parameters(), lr=executor.config.learning_rate)
+        model,epoch = executor.load_model(model,optimizer,executor.train_path,True)
+        if executor.config.rescale:
+            geom_path = executor.rescaled_path
+        else:
+            geom_path = executor.config.geometry_path
+        # Load the geometry
+        mesh = trimesh.load(geom_path)
         # Get mesh data
         v, f = mesh.vertices, mesh.faces
         sdf_values = []
         print(f"Generating SDF values for cube size {volume_size[0]}")
         S=np.array([])
-        threshold1 = 0.01
-        threshold2 = 0.00025
+        executor.config.threshold1 = 0.01
+        executor.config.threshold2 = 0.00025
         predicted_labels1 = []
         actual_labels1 =[]
         predicted_labels2 = []
         actual_labels2 = []
         mismatching_coordinates1 = []
         mismatching_coordinates2 =[]
-        loss_threshold_1 = torch.zeros(1, device=device)
-        loss_threshold_2 = torch.zeros(1, device=device)
+        loss_threshold_1 = torch.zeros(1, device=executor.device)
+        loss_threshold_2 = torch.zeros(1, device=executor.device)
         indices1_len = 0
         indices2_len = 0
         mse_loss = nn.MSELoss()
-        batch_size = 655360  # Adjust based on available memory
+        batch_size = executor.config.ppbatchsize # Adjust based on available memory
         with torch.no_grad():
             for i in range(0, coordinates.shape[0], batch_size):
                 batch_coordinates = coordinates[i:i + batch_size]
@@ -301,6 +174,7 @@ def post_process(model,save_directory,geometry_path,num_points_uniform,num_point
             accuracy2 = accuracy_score(actual_labels2, predicted_labels2)
             print(f"accuracy1 is {accuracy1}")
             print(f"accuracy2 is {accuracy2}")
+            save_directory = executor.postprocess_save_path
             generate_classification_report(actual_labels1, predicted_labels1, save_directory,"1")
             generate_classification_report(actual_labels2, predicted_labels2, save_directory,"2")
             generate_confusion_matrix(actual_labels1, predicted_labels1, save_directory,"1")
@@ -324,12 +198,7 @@ def post_process(model,save_directory,geometry_path,num_points_uniform,num_point
                 'End Time': [end_time],
                 'Time Taken': [end_time - start_time],
                 'Epoch': [epoch],
-                'total_points': [total_points],
                 'Resolution': [volume_size[0]],
-                'Geometry': [os.path.basename(geometry_path)],
-                'Points_Uni': [num_points_uniform],
-                'Points_Surface': [num_points_surface],
-                'Points_Narrow_Band': [num_points_narrow_band],
                 'NMSELoss_Mismatch 0.01': [n_mse_mismatch_loss1],
                 'NMSELoss_Mismatch 0.00025': [n_mse_mismatch_loss2],
                 'Accuracy' :[accuracy1],
@@ -337,138 +206,8 @@ def post_process(model,save_directory,geometry_path,num_points_uniform,num_point
         })
         
         # Save the DataFrame to the CSV file in "append" mode
-        iteration_df.to_csv( os.path.join(os.path.dirname(save_directory),"resultsfull.csv"), mode='a', header=False, index=False)     
-        sdf_values = torch.cat(sdf_values)
-
-        # Reshape the SDF values array to match the volume shape
-        sdf_values = sdf_values.cpu().numpy().reshape(volume_size)
-        # cube_sizes = [256, 128, 64, 32]
-        # for cube_size in cube_sizes:
-        recon_size=256
-        spacing = (2/recon_size, 2/recon_size, 2/recon_size)
-        sdf_values_check = sdf_values[::volume_size[0]//recon_size, ::volume_size[0]//recon_size, ::volume_size[0]//recon_size]
-        # sdf_values_check=sdf_values
-        print(f"Generating mesh for cube size {recon_size}")
-        verts, faces, normals, _ = marching_cubes(sdf_values_check, level=0.0,spacing=spacing)
-        print(f"Mesh generated for cube size {recon_size}")
-        # save the mesh
-        centroid = np.mean(verts)
-        verts -= centroid
-        # save the mesh
-        mesh = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
-        # mesh.export(os.path.join(save_directory, f"output_mesh{i}.stl"), file_type='stl')
-        print(f"Saving mesh to {os.path.join(save_directory, f'{os.path.basename(geometry_path)}_resconstructed_{recon_size}.stl')}")
-        mesh.export(os.path.join(save_directory, f"{os.path.basename(geometry_path)}_resconstructed_{recon_size}.stl"), file_type='stl') 
-        # else:
-        #     sdf_values_check = sdf_values[::256//cube_size, ::256//cube_size, ::256//cube_size]
-            #     verts_check, faces_check, normals_check, _ = marching_cubes(sdf_values_check, level=0.0,spacing=spacing)
-            #     # save the mesh
-            #     centroid = np.mean(verts_check)
-            #     verts_check -= centroid
-            #     # save the mesh
-            #     mesh = trimesh.Trimesh(vertices=verts_check, faces=faces_check)
-            #     # mesh.export(os.path.join(save_directory, f"output_mesh{i}.stl"), file_type='stl')
-            #     mesh.export(os.path.join(save_directory, f"{os.path.basename(geometry_path)}_resconstructed_{cube_size}.stl"), file_type='stl') 
-
-        # mesh = trimesh.load(geometry_path)
-
-        # # Get mesh data
-        # v, f = mesh.vertices, mesh.faces
-        # # Calculate signed distance values
-        # print("Calculating signed distance values")
-        # cpu_coordinates = coordinates.cpu().numpy()
-        # S=np.array([])
-        # mse_loss = nn.MSELoss()
-        # print("Calculating true signed distance values")
-        # for i in range(0, len(cpu_coordinates), batch_size):
-        #     S_in, _, _ = igl.signed_distance(cpu_coordinates[i:i+batch_size], v, f, return_normals=False)
-        #     S=np.append(S,S_in)
-        #     # finding if the points are 
-        #     indices=np.where(S.abs()<=0.01)[0]
-
-        # # Calculate the MSE loss
-        # import torch.nn as nn
-        # # Calculate the MSE loss
-        # mse_loss = nn.MSELoss()
-        # loss = mse_loss(torch.FloatTensor(S), torch.FloatTensor(sdf_values.ravel()))
-        # # find the mse-error of vertices
-        # # v= torch.FloatTensor(v).to(device)
-        # # pred= model(v)
-        # # actual = torch.zeros_like(pred,device=device)
-        # # loss_v = mse_loss(pred, actual)
-        # # normalized_vertices_loss = loss_v.cpu().detach().numpy()/2
-        # # Calculate predicted labels (+1 for positive, -1 for negative, 0 for zero)
-        # predicted_labels = np.sign(sdf_values)
-
-        # # Calculate actual labels (+1 for positive, -1 for negative, 0 for zero)
-        # actual_labels = np.sign(S)
-
-        # # Generate the classification report
-        # class_report = classification_report(actual_labels1, predicted_labels1, output_dict=True)
-        # # Convert the classification report to a DataFrame
-        # df = pd.DataFrame(class_report).transpose()
-        # # Save the DataFrame to a CSV file
-        # csv_filename = os.path.join(save_directory,"classification_report.csv")
-        # df.to_csv(csv_filename, index=True)
-        # print(f"Classification report saved to {csv_filename}")
-        # Create a confusion matrix
-        # cm = confusion_matrix(y_true=actual_labels, y_pred=predicted_labels)
-        # # Calculate row-wise sums
-        # row_sums = cm.sum(axis=1, keepdims=True)
-        # # Normalize the confusion matrix to percentages
-        # cm_percent = (cm / row_sums) * 100
-        # # Plot the confusion matrix as a heatmap
-        # sns.heatmap(cm_percent, annot=True, cmap='inferno', fmt='.1f')  # fmt='.1f' formats the percentages to one decimal place
-        # plt.xlabel("Prediction")
-        # plt.ylabel("Actual Value")
-        # plt.savefig(os.path.join(save_directory, "cm.png"))
-        # plt.close()
-        # # Find indices where label mismatch occurs within the specified threshold
-        # inside_range_indices = np.where((S >= -threshold) & (S <= threshold))[0]
-        # # Check if the actual and predicted labels match within the specified range of S
-        # mismatching_coordinates = []
-        # coordinates=coordinates.cpu().numpy()
-        # for index in inside_range_indices:
-        #     if actual_labels[index] != predicted_labels[index]:
-        #         mismatching_coordinates.append(coordinates[index])
-        # inside_range_indices = np.where((S >= -threshold) & (S <= threshold))[0]
-
-        # # Check if the actual and predicted labels match within the specified range of S
-        # mismatching_indices = inside_range_indices[(actual_labels[inside_range_indices] != predicted_labels[inside_range_indices])]
-
-        # # Extract the mismatching coordinates
-        # mismatching_coordinates = coordinates[mismatching_indices]
-        # # Save the mismatched coordinates to a CSV file
-        # header_row = np.array([['x', 'y', 'z']])
-        # mismatching_coordinates =np.array(mismatching_coordinates)
-        # # Calculate the MSE mismatch loss
-        # mse_mismatch_loss = mse_loss(torch.FloatTensor(S[inside_range_indices]), torch.FloatTensor(sdf_values.ravel()[inside_range_indices]))
-        # n_mse_mismatch_loss=mse_mismatch_loss/2
-        # First, calculate n_mse_mismatch_loss for the first threshold (0.01)
-        # Calculate n_mse_mismatch_loss for the first threshold (0.01)
-        # threshold1 = 0.01
-        # inside_range_indices1 = np.where(S.abs() <= threshold1)[0]
-
-        # # Check if the actual and predicted labels match within the specified range of S
-        # mismatching_indices1 = inside_range_indices1[(actual_labels[inside_range_indices1] != predicted_labels[inside_range_indices1])]
-
-        # # Extract the mismatching coordinates
-        # mismatching_coordinates1 = coordinates[mismatching_indices1]
-
-        # # Calculate the MSE mismatch loss for the first threshold
-        # mse_mismatch_loss1 = mse_loss(torch.FloatTensor(S[inside_range_indices1]), torch.FloatTensor(sdf_values.ravel()[inside_range_indices1]))
-        # n_mse_mismatch_loss1 = mse_mismatch_loss1 / (2*threshold1)
-
-        # # Calculate n_mse_mismatch_loss for the second threshold (0.00025) using the same indices
-        # threshold2 = 0.00025
-        # inside_range_indices2 = inside_range_indices1  # Reuse the same indices
-        # inside_range_indices2 = inside_range_indices2[(S[inside_range_indices2].abs() <= threshold2)]
-
-        # # Calculate the MSE mismatch loss for the second threshold
-        # mse_mismatch_loss2 = mse_loss(torch.FloatTensor(S[inside_range_indices2]), torch.FloatTensor(sdf_values.ravel()[inside_range_indices2]))
-        # n_mse_mismatch_loss2 = mse_mismatch_loss2 / (2*threshold2)
-
-        return n_mse_mismatch_loss2
+        iteration_df.to_csv( os.path.join(os.path.dirname(save_directory),"results.csv"), mode='a', header=True, index=False)     
+        return True
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         return 1000

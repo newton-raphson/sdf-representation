@@ -12,6 +12,7 @@ import torch
 from dataloader import load_data
 import matplotlib.pyplot as plt
 import pickle
+from evaluations import post_process
 
 class Executor:
     def __init__(self, config):
@@ -41,7 +42,7 @@ class Executor:
         # inside the train_path create a folder to save the  plots
         self.plot_save_path = create_directory(os.path.join(self.train_path,"plots"))
     def rescale(self):
-        rescaled_path=os.path.join(self.main_path,self.geometry_name[:-4]+"_rescaled.stl")
+        self.rescaled_path=os.path.join(self.main_path,self.geometry_name[:-4]+"_rescaled.stl")
         # if the rescaled file exists then use that
         if not os.path.exists(rescaled_path):
             # Load the mesh
@@ -254,28 +255,6 @@ class Executor:
         # mesh.export(os.path.join(save_directory, f"output_mesh{i}.stl"), file_type='stl')
         print(f"Saving mesh to {os.path.join(self.postprocess_save_path, f'{os.path.basename(geometry_path)}_resconstructed_{epoch}.stl')}")
         mesh.export(os.path.join(self.postprocess_save_path, f"{os.path.basename(geometry_path)}_resconstructed_{epoch}_cube_{cube}.stl"), file_type='stl') 
-
-    def postprocess(self):
-        # already in the class variables
-        volume_size = (self.cubesize, self.cubesize, self.cubesize)
-        spacing = (2/volume_size[0], 2/volume_size[1], 2/volume_size[2])
-        x = torch.linspace(-1, 1, volume_size[0], device=device)
-        xx, yy, zz = torch.meshgrid(x, x, x, indexing='ij')
-        # Reshape the coordinates to create a DataFrame
-        coordinates = torch.stack((xx, yy, zz), dim=-1).reshape(-1, 3).to(self.device)
-        batch_size = self.conf.ppbatchsize  # Adjust based on available memory
-        sdf_values = []
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.lr)
-        self.model, epoch = self.load_model(self.model,optimizer,self.model_save_path,best=True)
-        self.model.eval()
-        with torch.no_grad():
-            for i in range(0, coordinates.shape[0], batch_size):
-                batch_coordinates = coordinates[i:i + batch_size]
-                batch_sdf = self.model(batch_coordinates).to(torch.float32)
-                # type(batch_sdf)
-                sdf_values.append(batch_sdf)
-                batch_sdf = batch_sdf.ravel()
-        
     def run(self):
         if self.config.samplingonly:
             print("Sampling only")
@@ -290,7 +269,7 @@ class Executor:
         self.loss = self.config.loss
         if self.config.ppo:
             print("PPO only")
-            self.postprocess()
+            post_process.post_process(self)
             return
         self.train()
         return
@@ -384,4 +363,4 @@ if __name__ == '__main__':
     # pass the config file path to the function
     config_file_path = sys.argv[1]
     config = Configuration(config_file_path)
-    testing_different_stl(config)
+    
