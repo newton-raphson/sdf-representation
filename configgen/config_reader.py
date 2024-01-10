@@ -2,7 +2,8 @@
 # The Configuration object contains all the parameters needed for the training
 
 import configparser
-from sdf_regression_2 import models
+from model import networks,losses
+
 class Configuration:
     def __init__(self, file_path='config.ini'):
         self.config = configparser.ConfigParser()
@@ -13,7 +14,7 @@ class Configuration:
         self.directory = self.config.get("Files","directory")
         
         # MODEL PARAMS 
-        model = getattr(models,self.config.get("Model","model"))
+        model = getattr(networks,self.config.get("Model","model"))
         # for model
         self.hidden_dim = self.config.getint("Model","hidden_dim")
         self.num_hidden_layers = self.config.getint("Model","num_hidden_layers")
@@ -39,7 +40,9 @@ class Configuration:
         self.epochs = self.config.getint("Training","epochs")
         self.minepochs = self.config.getint("Training","min_epochs")
         self.batchsize = self.config.getint("Training","batch_size")
-
+        self.requires_normal = self.config.getboolean("Training","requires_normal")
+        self.checkpointing = self.config.getint("Training","checkpointing")
+    
         # SAMPLING PARAMS
         self.samplingonly = self.config.getboolean("Sampling","samplingonly")
         self.rescale = self.config.getboolean("Sampling","rescale")
@@ -53,15 +56,16 @@ class Configuration:
 
         #  SETTINGS
         self.ppo = self.config.getboolean("Optional","ppo") # if true only post processing is done
-
-
+        self.reconstruct = self.config.getboolean("Optional","reconstruct") # if true only reconstruction is done
+        self.cubesize = self.config.getint("Optional","cubesize")
+        self.ppbatchsize = self.config.getint("Optional","postprocessbatchsize")
     def get_loss_function(self):
         loss_function_name = self.config.get('Loss', 'loss_function')
 
         # Check if the loss function name is valid and available
-        if hasattr(models, loss_function_name):
+        if hasattr(losses, loss_function_name):
             # Get the loss function class dynamically using getattr
-            loss_function_class = getattr(models, loss_function_name)
+            loss_function_class = getattr(losses, loss_function_name)
 
             # Get parameters from the config
             parameters = {}

@@ -5,6 +5,7 @@ import pandas as pd
 import os
 import argparse
 import glob
+
 def transform_to_triangle_space(lhs_point, triangle_coords):
     """
     Transforms a point in 3D space to a point in the triangle space defined by the given triangle coordinates.

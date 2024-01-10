@@ -472,16 +472,7 @@ def post_process(model,save_directory,geometry_path,num_points_uniform,num_point
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         return 1000
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train a model for a given geometry")
-    parser.add_argument("--directory", type=str, help="Path to save")
-    parser.add_argument("--model", type=str, help="Path to model")
-    parser.add_argument("--cube", type=int,default=512, help="cube_size")
-    parser.add_argument("--num_hidden_layers", type=int, default=8, help="Number of hidden layers")
-    parser.add_argument("--hidden_dim", type=int, default=512, help="Hidden layer dimension")
-    parser.add_argument("--geometry", type=str, default="testing", help="Geometry")
-    return parser.parse_args()
-if __name__ == '__main__':
+
     args = parse_args()
     print(args.num_hidden_layers)
     reconstruct_mesh(args.directory,args.model,args.cube,args.num_hidden_layers,args.hidden_dim,args.geometry)
