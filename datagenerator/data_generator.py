@@ -5,7 +5,7 @@ import pandas as pd
 import os
 import argparse
 import glob
-
+from utils.constants import RANDOM_SEED_DATA_GENERATION
 def transform_to_triangle_space(lhs_point, triangle_coords):
     """
     Transforms a point in 3D space to a point in the triangle space defined by the given triangle coordinates.
@@ -159,15 +159,15 @@ def write_signed_distance_mismatch(query_points, geometry_path):
 # DAVID with 1 billion triangles
 def write_signed_distance_distributed(geometry_path,data_path,num_points_uniform, num_points_surface, num_points_narrow_band,dense_width=0.1,additional_points=0,path=None):
     # list all the files in the directory
-    files = glob.glob(path)
-    # os create uniform.csv, on_surface.csv, narrow_band.csv
-    os.mkfile(os.path.join("data_path","uniform.csv"))
-    os.mkfile(os.path.join("data_path","on_surface.csv"))
-    os.mkfile(os.path.join("data_path","narrow_band.csv"))
+    files = glob.glob(geometry_path+"/*")
+    print(f"Number of files is {len(files)}")
+
     # go inside the file 
     for file in files:
         # get the .ply file inside it 
         ply_file = glob.glob(file+"/*.ply")
+        if len(ply_file) == 0:
+            continue
         # for each ply file generate the signed distance data
         for file in ply_file:
             # generate the signed distance data
@@ -177,16 +177,17 @@ def write_signed_distance_distributed(geometry_path,data_path,num_points_uniform
                 num_points_surface,
                 num_points_narrow_band,
                 dense_width,
-                additional_points
+                additional_points,
+                distributed=True
             )
             # append the data to the csv file
-            df_uniform_points.to_csv(os.path.join("data_path","uniform.csv"),mode='a',index=False)
-            df_on_surface.to_csv(os.path.join("data_path","on_surface.csv"),mode='a',index=False)
-            df_narrow_band.to_csv(os.path.join("data_path","on_surface.csv"),mode='a',index=False)
+            df_uniform_points.to_csv(os.path.join(data_path,"uniform.csv"),mode='a',index=False)
+            df_on_surface.to_csv(os.path.join(data_path,"surface.csv"),mode='a',index=False)
+            df_narrow_band.to_csv(os.path.join(data_path,"narrow.csv"),mode='a',index=False)
     return True
 
 # main function to generate signed distance data
-def generate_signed_distance_data(geometry,num_points_uniform, num_points_surface, num_points_narrow_band,dense_width=0.1,additional_points=0,path=None):
+def generate_signed_distance_data(geometry,num_points_uniform, num_points_surface, num_points_narrow_band,dense_width=0.1,additional_points=0,path=None,distributed=False):
     """
     Generate signed distance data for a given mesh geometry.
 
@@ -205,19 +206,23 @@ def generate_signed_distance_data(geometry,num_points_uniform, num_points_surfac
     # Load the mesh
     mesh = trimesh.load(geometry)
 
-    # Check if mesh is within bounds
-    if not np.all(np.logical_and(mesh.vertices >= -1, mesh.vertices <= 1)):
-        raise ValueError("Mesh is out of bounds. Please ensure that the mesh is bounded between -1 and 1.")
+    # # Check if mesh is within bounds
+    # if not np.all(np.logical_and(mesh.vertices >= -1, mesh.vertices <= 1)):
+    #     raise ValueError("Mesh is out of bounds. Please ensure that the mesh is bounded between -1 and 1.")
     # Get mesh data
     v, f = mesh.vertices, mesh.faces
     # using constant seed for reproducibility
-    np.random.seed(100)
+    np.random.seed(RANDOM_SEED_DATA_GENERATION)
     # Generate random points
     points_inside_box = num_points_uniform
     print("Generating points")
+
     query_uniform_points = np.random.uniform(-1, 1, size=(int(points_inside_box), 3))
     print("uniform points generated")
-    
+    if distributed:
+        min_value = np.min(np.min(mesh.vertices, axis=0))*1.1
+        max_value = np.max(np.max(mesh.vertices, axis=0))*1.1
+        query_uniform_points = np.random.uniform(min_value, max_value, size=(int(points_inside_box), 3))
     # Calculate mean curvature for each triangle
     # triangle_mean_curvature = calculate_mean_curvature(mesh, v,f, 0.1)
 

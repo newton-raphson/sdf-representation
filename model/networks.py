@@ -1,9 +1,7 @@
 import torch
 import torch.nn as nn
-from torch.nn.utils import weight_norm
 import numpy as np
 import math
-import pywt
 class ImplicitNet(nn.Module):
     """_summary_
     This class defines the architecture of the implicit network which can be 
@@ -83,7 +81,8 @@ class ImplicitNet(nn.Module):
         # vanilla relu
         else:
             self.activation = nn.ReLU()
-        
+    def __name__(self):
+        return "ImplicitNet"
     def forward(self, input):
 
         x = input

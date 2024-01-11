@@ -12,6 +12,7 @@ class Configuration:
         # FILE
         self.geometry = self.config.get("Files", "geometry")
         self.directory = self.config.get("Files","directory")
+        self.name = self.config.get("Files","name")
         
         # MODEL PARAMS 
         model = getattr(networks,self.config.get("Model","model"))
@@ -40,7 +41,6 @@ class Configuration:
         self.epochs = self.config.getint("Training","epochs")
         self.minepochs = self.config.getint("Training","min_epochs")
         self.batchsize = self.config.getint("Training","batch_size")
-        self.requires_normal = self.config.getboolean("Training","requires_normal")
         self.checkpointing = self.config.getint("Training","checkpointing")
     
         # SAMPLING PARAMS

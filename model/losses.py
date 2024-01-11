@@ -1,11 +1,6 @@
 # loss Function to test 
 import torch
 import torch.nn as nn
-from torch.nn.utils import weight_norm
-import numpy as np
-import math
-import pywt
-import torch.nn.functional as F
 
 # Every Loss functions def forward(self,x_batch,y_batch,model,epoch):
 # forward arguments should be 
@@ -33,10 +28,10 @@ class RegularizedCustomSDFLoss(nn.Module):
         self.regularizer_weight = 1e2
         self.regularizer_threshold = threshold
 
-    def forward(self,target_sdf, predicted_sdf,model, pj,true_surface_normal,epoch,surface_normal):
+    def forward(self,x_batch,y_batch,model,epoch):
         # Apply the clamp operation to predicted and target SDF values
-        predicted_sdf = torch.clamp(predicted_sdf, -self.delta, self.delta)
-        target_sdf = torch.clamp(target_sdf, -self.delta, self.delta)
+        predicted_sdf = torch.clamp(model(x_batch), -self.delta, self.delta)
+        target_sdf = torch.clamp(y_batch[:,0], -self.delta, self.delta)
 
         # Calculate the L1 loss between the clamped SDF values
         loss = (predicted_sdf - target_sdf)**2
@@ -51,6 +46,9 @@ class WeightedSmoothL2Loss(nn.Module):
         self.weight_factor = weight_factor
         self.delta = delta
         self.alpha = alpha
+    def __name__(self):
+        return "WeightedSmoothL2Loss"
+    
     def forward(self, y_true, y_pred,model, pj,true_surface_normal,epoch,surface_normal):
         # Convert inputs to PyTorch tensors if they are not already
         if not isinstance(y_true, torch.Tensor):

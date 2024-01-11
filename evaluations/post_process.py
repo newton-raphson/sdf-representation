@@ -9,11 +9,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 import torch.nn as nn
-import pickle
 import time
-from models import ImplicitNet
-import argparse
-from executor.executor import Executor
+
+
 
 
 
@@ -39,9 +37,9 @@ def generate_confusion_matrix(actual_labels, predicted_labels, save_directory,ke
     plt.savefig(os.path.join(save_directory, f"cm{key}.png"))
     plt.close()
 # main function
-def post_process(executor:Executor):
-    if not isinstance(executor, Executor):
-        raise ValueError("executor must be an instance of Executor")
+def post_process(executor):
+    # if not isinstance(executor, Executor):
+    #     raise ValueError("executor must be an instance of Executor")
     
     start_time = time.time()
     try:
