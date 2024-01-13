@@ -66,14 +66,15 @@ class Executor:
             print("Rescaled file already exists")
         return self.rescaled_path
     def sampling(self):
-        if os.path.exists(os.path.join(self.data_path,"uniform_points.csv")):
+        if os.path.exists(os.path.join(self.data_path,"uniform.csv")) or os.path.exists(os.path.join(self.data_path,"surface.csv")) or os.path.exists(os.path.join(self.data_path,"narrow")):
             print("Sampling already done")
+            return
         elif self.config.distributed:
             data_generator.write_signed_distance_distributed(self.config.geometry,self.data_path,self.config.uniform_points,self.config.surface,self.config.narrowband,self.config.narrowband_width)
             print("Distributed sampling done")
         else:
             geometry_path = self.config.geometry if not self.config.rescale else self.rescale()
-            df_uniform_points,df_on_surface,df_narrow_band, = data_generator.generate_signed_distance_data(geometry_path,self.config.uniform_points,self.config.surface,self.config.narrowband,self.config.narrowband_width)
+            df_uniform_points,df_on_surface,df_narrow_band = data_generator.generate_signed_distance_data(geometry_path,self.config.uniform_points,self.config.surface,self.config.narrowband,self.config.narrowband_width)
             # save the dataframes to CSV
             df_uniform_points.to_csv(os.path.join(self.data_path,"uniform.csv"))
             df_on_surface.to_csv(os.path.join(self.data_path,"surface.csv"))
@@ -119,8 +120,8 @@ class Executor:
             val_loss /= len(validation_dataloader)
             val_loss_per_epoch.append(val_loss)
             # write this to a file 
-            with open(os.path.join(self.train_path,"train_loss.txt"),"w") as f:
-                f.write(f"Epoch {i+1}/{self.config.epochs}: train loss {train_loss} validation loss {val_loss}")
+            with open(os.path.join(self.train_path,"train_loss.txt"),"a") as f:
+                f.write(f"Epoch {i+1}/{self.config.epochs}: train loss {train_loss} validation loss {val_loss}\n")
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss

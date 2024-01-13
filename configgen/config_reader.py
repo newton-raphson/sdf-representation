@@ -42,6 +42,8 @@ class Configuration:
         self.minepochs = self.config.getint("Training","min_epochs")
         self.batchsize = self.config.getint("Training","batch_size")
         self.checkpointing = self.config.getint("Training","checkpointing")
+        self.contd = self.config.getboolean("Training","continue")
+        self.patience = self.config.getint("Training","patience")
     
         # SAMPLING PARAMS
         self.samplingonly = self.config.getboolean("Sampling","samplingonly")

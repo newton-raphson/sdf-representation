@@ -20,6 +20,7 @@ def load_data(data_path, config, device):
         training_dataloader (torch.utils.data.DataLoader): The data loader for training.
         validation_dataset (torch.utils.data.TensorDataset): The dataset for validation.
     """
+    save_directory=data_path
     # check if the csv exists in the path or not
     df_uniform_points = pd.read_csv(os.path.join(save_directory, "uniform.csv"))
     df_on_surface = pd.read_csv(os.path.join(save_directory, "surface.csv"))
@@ -36,20 +37,24 @@ def load_data(data_path, config, device):
     # Concatenate the data frames in the list if there are more than one
     df = pd.concat(dfs_to_concat, ignore_index=True)
     total_points = len(df)
-    feature_columns = ['x', 'y', 'z']
-    target_column = ['S', 'nx', 'ny', 'nz']
-
-
-    X_train, val_X, y_train, val_Y = train_test_split(df[feature_columns], df[target_column], config.train_test_split, random_state=RANDOM_SEED_TEST_SPLIT)
+    print(f"Total points in the dataset: {total_points}")
+    feature_columns = df.columns[1:-4]
+    target_column = df.columns[-4:]
+    print(feature_columns)
+    print(target_column)
+    print("traint_test_split_value", config.train_test_split)
+    print(df[feature_columns].shape)
+    print(df[target_column].shape)
+    X_train, val_X, y_train, val_Y = train_test_split(df[feature_columns], df[target_column], test_size=config.train_test_split, random_state=RANDOM_SEED_TEST_SPLIT)
 
     X = torch.tensor(X_train.values, dtype=torch.float32).to(device)
     Y = torch.tensor(y_train.values, dtype=torch.float32).to(device)
-    val_X = torch.tensor(val_X[0].values, dtype=torch.float32).to(device)
-    val_Y = torch.tensor(val_Y[0].values, dtype=torch.float32).to(device)
+    val_X = torch.tensor(val_X.values, dtype=torch.float32).to(device)
+    val_Y = torch.tensor(val_Y.values, dtype=torch.float32).to(device)
 
     training_dataset = torch.utils.data.TensorDataset(X, Y)
-    training_dataloader = torch.utils.data.DataLoader(training_dataset, batch_size=config.batch_size, shuffle=True)
+    training_dataloader = torch.utils.data.DataLoader(training_dataset, batch_size=config.batchsize, shuffle=True)
     validation_dataset = torch.utils.data.TensorDataset(val_X, val_Y)
-    validation_dataloader = torch.utils.data.DataLoader(validation_dataset, batch_size=config.batch_size, shuffle=True)
+    validation_dataloader = torch.utils.data.DataLoader(validation_dataset, batch_size=config.batchsize, shuffle=True)
 
     return training_dataloader, validation_dataloader

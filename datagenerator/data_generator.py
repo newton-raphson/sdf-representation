@@ -6,6 +6,8 @@ import os
 import argparse
 import glob
 from utils.constants import RANDOM_SEED_DATA_GENERATION
+##############################################################################################################
+#####################################UTILITY FUNCTIONS########################################################
 def transform_to_triangle_space(lhs_point, triangle_coords):
     """
     Transforms a point in 3D space to a point in the triangle space defined by the given triangle coordinates.
@@ -124,6 +126,12 @@ def generate_occupancy(cube_size, geometry_path):
     df = pd.DataFrame(data, columns=['x', 'y', 'z','S'])
     df.to_csv("occupancy.csv",index=False)
     return df
+
+
+##############################################################################################################
+##################################### MAIN FUNCTIONS ##########################################################
+
+
 # TO GENERAATE MISMATCH DATA AFTER POST PROCESSING
 def write_signed_distance_mismatch(query_points, geometry_path):
     mesh = trimesh.load(geometry_path)
@@ -154,10 +162,30 @@ def write_signed_distance_mismatch(query_points, geometry_path):
     data = np.column_stack((query_points, S,n))
     df = pd.DataFrame(data, columns=['x', 'y', 'z', 'S','nx','ny','nz'])
     return df
+
 # handle distributed file system
 # specifically created to handle something like 
 # DAVID with 1 billion triangles
-def write_signed_distance_distributed(geometry_path,data_path,num_points_uniform, num_points_surface, num_points_narrow_band,dense_width=0.1,additional_points=0,path=None):
+
+
+def write_signed_distance_distributed(geometry_path, data_path, num_points_uniform, num_points_surface, num_points_narrow_band, dense_width=0.1, additional_points=0, path=None):
+    """
+    Writes signed distance data to CSV files for a given set of geometry files.
+
+    Parameters:
+    - geometry_path (str): The path to the directory containing the geometry files.
+    - data_path (str): The path to the directory where the CSV files will be saved.
+    - num_points_uniform (int): The number of uniformly distributed points to generate for each geometry file.
+    - num_points_surface (int): The number of points to generate on the surface of each geometry file.
+    - num_points_narrow_band (int): The number of points to generate within the narrow band of each geometry file.
+    - dense_width (float, optional): The width of the dense region around the surface. Default is 0.1.
+    NOT USED 
+    - additional_points (int, optional): The number of additional points to generate for each geometry file. Default is 0. 
+    - path (str, optional): The path to a specific geometry file. If provided, only this file will be processed. Default is None.
+
+    Returns:
+    - bool: True if the signed distance data is successfully written to the CSV files, otherwise function fails
+    """
     # list all the files in the directory
     files = glob.glob(geometry_path+"/*")
     print(f"Number of files is {len(files)}")
