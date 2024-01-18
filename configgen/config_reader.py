@@ -21,18 +21,17 @@ class Configuration:
         self.num_hidden_layers = self.config.getint("Model","num_hidden_layers")
         dims = [self.hidden_dim for i in range(self.num_hidden_layers)]
         self.input_dim = self.config.getint("Model","input_dim")
-        self.skip_connection = self.config.getint("Model","skip_connection")
-        if self.skip_connection == 0:
+        val = self.config.getint("Model","skip_connection")
+        if val == 0:
             self.skip_connection = ()
-        # send beta = 0 if no skip connection 
-        if self.skip_connection == 0:
             self.beta = 0
         else:
+            self.skip_connection = (val,)
             self.beta = self.config.getfloat("Model","beta")
         self.geometric_init = self.config.getboolean("Model","geometric_init")
-        
+        print("skip_connection",self.skip_connection)
         self.model = model(self.input_dim,dims,self.skip_connection,self.beta,self.geometric_init)
-        
+        print(self.model)
         # LOSS PARAMS
         self.loss = self.get_loss_function()
 
@@ -47,6 +46,7 @@ class Configuration:
     
         # SAMPLING PARAMS
         self.samplingonly = self.config.getboolean("Sampling","samplingonly")
+        self.continue_sampling = self.config.getboolean("Sampling","continue_sampling")
         self.rescale = self.config.getboolean("Sampling","rescale")
         self.distributed = self.config.getboolean("Sampling","distributed")
         self.uniform_points = self.config.getint("Sampling","uniform_points")

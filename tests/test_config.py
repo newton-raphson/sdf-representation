@@ -1,7 +1,7 @@
 import pytest
 import os
-from config_generator import Configuration
-from sdf_regression_2 import models
+from configgen.config_reader import Configuration
+from model.networks import ImplicitNet
 
 def test_configuration():
     # Create a Configuration object with a test config file

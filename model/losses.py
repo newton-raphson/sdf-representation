@@ -15,7 +15,20 @@ import torch.nn as nn
 #         # Implement loss function here using PyTorch operations
 #         return loss
 ############################################################################################################################################
-
+# create a loss function class here with just mean squared error
+class MSELoss(nn.Module):
+    def __init__(self):
+        super(MSELoss, self).__init__()
+    def __name__(self):
+        return "MSELoss"
+    def forward(self, x_batch,y_batch,model,epoch):
+        # Convert inputs to PyTorch tensors if they are not already
+        y_true = y_batch[:,0]
+        y_pred = model(x_batch)
+        # Implement mean squared error here using PyTorch operations
+        loss = (y_true - y_pred)**2
+        total_loss = loss.mean()
+        return total_loss
 # implemented as per the DeepSDF paper
 class CustomSDFLoss(nn.Module):
     # delta is the threshold value which is used to clamp the predicted and target SDF values
@@ -31,10 +44,9 @@ class CustomSDFLoss(nn.Module):
         target_sdf = torch.clamp(y_batch[:,0], -self.delta, self.delta)
 
         # Calculate the L2 loss between the clamped SDF values
-        loss = torch.abs(predicted_sdf - target_sdf)
-        total_loss = loss.mean()
-        return total_loss
-    
+        loss = nn.functional.mse_loss(predicted_sdf, target_sdf)
+        return loss
+
 class WeightedSmoothL2Loss(nn.Module):
     def __init__(self, weight_factor=0.5,delta=0.1):
         super(WeightedSmoothL2Loss, self).__init__()
@@ -45,7 +57,7 @@ class WeightedSmoothL2Loss(nn.Module):
     
     def forward(self, x_batch,y_batch,model,epoch):
         # Convert inputs to PyTorch tensors if they are not already
-        y_true = torch.tensor(y_batch[:,0], dtype=torch.float32)
+        y_true = torch.clamp(y_batch[:,0], -self.delta, self.delta)
         y_pred = torch.clamp(model(x_batch), -self.delta, self.delta)
         error = y_true - y_pred
         absolute_error = torch.abs(error)
@@ -53,8 +65,6 @@ class WeightedSmoothL2Loss(nn.Module):
         # Calculate the weight based on the proximity of y_true to zero
         weight = 1.0 + self.weight_factor * torch.exp(-torch.abs(y_true))
 
-        # Implement mean squared error here using PyTorch operations and use alpha to combine 
-        # the two loss functions
         l2_loss = torch.mean(weight * absolute_error**2) 
         return l2_loss
   
@@ -68,20 +78,20 @@ class CombinedLoss(nn.Module):
         return "CombinedLoss"
     def forward(self, x_batch,y_batch,model,epoch):
         # Convert inputs to PyTorch tensors if they are not already
-        y_true = torch.tensor(y_batch[:,0], dtype=torch.float32)
+        y_true = torch.clamp(y_batch[:,0], -self.delta, self.delta)
         y_pred = torch.clamp(model(x_batch), -self.delta, self.delta)
         error = y_true - y_pred
-        absolute_error = torch.abs(error)
+        absolute_error = torch.abs(error)+ torch.FloatTensor([1e-8]).cuda()
         # calculate the l1 loss function as well here 
         l1_loss = torch.mean(torch.abs(error))
         # Calculate the weight based on the proximity of y_true to zero
-        weight = 1.0 + self.weight_factor * torch.exp(-torch.abs(y_true))
+        weight = 1.0 + self.weight_factor * torch.exp(-torch.abs(y_true)/self.delta)
 
         # Implement mean squared error here using PyTorch operations and use alpha to combine 
         # the two loss functions
         l2_loss = torch.mean(weight * absolute_error**2) 
         total_loss = self.alpha*l1_loss + (1-self.alpha)*l2_loss
-        return l2_loss
+        return total_loss
 
 class IGRLOSS(nn.Module):
     # delta is the threshold value which is used to clamp the predicted and target SDF values

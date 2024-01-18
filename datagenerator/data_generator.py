@@ -127,7 +127,45 @@ def generate_occupancy(cube_size, geometry_path):
     df.to_csv("occupancy.csv",index=False)
     return df
 
+def compute_min_max(geometry_path):
+    """
+    Computes the minimum and maximum values of vertices in the given geometry path.
 
+    Args:
+        geometry_path (str): The path to the directory containing the geometry files.
+
+    Returns:
+        tuple: A tuple containing the maximum and minimum values of vertices.
+    """
+    files = glob.glob(geometry_path+"/*")
+    max_val=0
+    min_val=0
+    print(f"Number of files is {len(files)}")
+    if os.path.exists(os.path.join(geometry_path,"max_min.txt")):
+        # read the max and min values from the file
+        with open(os.path.join(geometry_path,"max_min.txt"),"r") as f:
+            max_val = float(f.readline())
+            min_val = float(f.readline())
+        return max_val,min_val
+
+    # go inside the file 
+    for file in files:
+        # get the .ply file inside it 
+        ply_file = glob.glob(file+"/*.ply")
+        if len(ply_file) == 0:
+            continue
+        # for each ply file generate the signed distance data
+        for file in ply_file:
+            mesh = trimesh.load(file)
+            if np.min(mesh.vertices) < min_val:
+                min_val = np.min(mesh.vertices)
+            if np.max(mesh.vertices) > max_val:
+                max_val = np.max(mesh.vertices)
+    if not os.path.exists(os.path.join(geometry_path,"max_min.txt")):
+        with open(os.path.join(geometry_path,"max_min.txt"),"w") as f:
+            f.write(str(max_val)+"\n")
+            f.write(str(min_val)+"\n")
+    return max_val,min_val
 ##############################################################################################################
 ##################################### MAIN FUNCTIONS ##########################################################
 
@@ -189,7 +227,24 @@ def write_signed_distance_distributed(geometry_path, data_path, num_points_unifo
     # list all the files in the directory
     files = glob.glob(geometry_path+"/*")
     print(f"Number of files is {len(files)}")
+    min_val,max_val = compute_min_max(geometry_path)
+    # apply a certain increment to the min and max values
+    # to make sure that the points are not on the surface 
+    # of the bounding box
+    
+    # increment by 40% of the max value
+    min_val = min_val - 0.4*max_val
+    max_val = max_val + 0.4*max_val
 
+    log_file_path = os.path.join(data_path, "processed_files.log")
+
+    # If the log file exists, read the processed files into a set
+    if os.path.exists(log_file_path):
+        with open(log_file_path, "r") as log_file:
+            processed_files = set(line.strip() for line in log_file)
+        print(f"Number of processed files is {len(processed_files)}")
+    else:
+        processed_files = set()
     # go inside the file 
     for file in files:
         # get the .ply file inside it 
@@ -198,6 +253,18 @@ def write_signed_distance_distributed(geometry_path, data_path, num_points_unifo
             continue
         # for each ply file generate the signed distance data
         for file in ply_file:
+            if file in processed_files:
+                continue
+            print("\n##############################################################################################################\n")
+
+            print(f"Processing file {file}")
+
+            print("\n##############################################################################################################\n")
+
+            # rescale the .ply file vertices to be between -1 and 1
+            mesh = trimesh.load(file)
+            mesh.vertices = (mesh.vertices - min_val)/(max_val-min_val)
+            mesh.export(file)
             # generate the signed distance data
             df_uniform_points, df_on_surface, df_narrow_band = generate_signed_distance_data(
                 file,
@@ -212,10 +279,13 @@ def write_signed_distance_distributed(geometry_path, data_path, num_points_unifo
             df_uniform_points.to_csv(os.path.join(data_path,"uniform.csv"),mode='a',index=False)
             df_on_surface.to_csv(os.path.join(data_path,"surface.csv"),mode='a',index=False)
             df_narrow_band.to_csv(os.path.join(data_path,"narrow.csv"),mode='a',index=False)
+            # add the file to the processed files
+            with open(log_file_path, "a") as log_file:
+                log_file.write(file + "\n")
     return True
 
 # main function to generate signed distance data
-def generate_signed_distance_data(geometry,num_points_uniform, num_points_surface, num_points_narrow_band,dense_width=0.1,additional_points=0,path=None,distributed=False):
+def generate_signed_distance_data(geometry,num_points_uniform, num_points_surface, num_points_narrow_band,dense_width=0.1,additional_points=0,path=None,distributed=False): 
     """
     Generate signed distance data for a given mesh geometry.
 

@@ -28,10 +28,10 @@ class ImplicitNet(nn.Module):
         d_in,
         dims,
         skip_in=(),
+        beta=100,
         geometric_init=True,
         radius_init=1,
         lipsitch= False,
-        beta=100
     ):
         super().__init__()
 
@@ -44,6 +44,7 @@ class ImplicitNet(nn.Module):
         #  making the network a FCN as described
         #  in the paper: https://arxiv.org/pdf/1901.05103.pdf
         self.skip_in = skip_in
+        print("skip_in",skip_in)
         # not tested for this project
         # implementated on the basis of following paper
         # https://arxiv.org/pdf/2202.08345.pdf
@@ -86,7 +87,6 @@ class ImplicitNet(nn.Module):
     def forward(self, input):
 
         x = input
-
         for layer in range(0, self.num_layers - 1):
 
             lin = getattr(self, "lin" + str(layer))
@@ -95,13 +95,14 @@ class ImplicitNet(nn.Module):
                 x = torch.cat([x, input], -1) / np.sqrt(2)
             if self.lipsitch:
                 self.normalization(lin.parameters(),1/self.ci[layer]*nn.softplus(beta=self.ci[layer]))
+            
             x = lin(x)
             if layer < self.num_layers - 2:
                 x = self.activation(x)
             # If the activation is ReLU
             elif isinstance(self.activation, nn.ReLU):  
                  # Apply tanh activation in the last layer to make it work as a FCN as described in the paper
-                x = torch.tanh(x) 
+                x = nn.Tanh()(x)
         return x
     # normalization for lipsitch implementation 
     # not tested for this project

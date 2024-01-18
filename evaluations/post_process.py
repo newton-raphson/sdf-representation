@@ -53,7 +53,7 @@ def post_process(executor):
         coordinates = torch.stack((xx, yy, zz), dim=-1).reshape(-1, 3)
         # Load the model
         model = executor.model
-        optimizer = torch.optim.Adam(model.parameters(), lr=executor.config.learning_rate)
+        optimizer = torch.optim.Adam(model.parameters(), lr=executor.config.lr)
         model,epoch = executor.load_model(model,optimizer,executor.train_path,True)
         if executor.config.rescale:
             geom_path = executor.rescaled_path

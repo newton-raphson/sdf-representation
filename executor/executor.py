@@ -11,7 +11,8 @@ import matplotlib.pyplot as plt
 import pickle
 from evaluations import post_process
 from collections import OrderedDict
-import igl
+from skimage.measure import marching_cubes
+from evaluations.generate_gif import plot_stl
 class Executor:
     def __init__(self, config):
         self.config = config
@@ -37,9 +38,17 @@ class Executor:
 
         # inside the train_path create a folder to save the  post processing results
         self.postprocess_save_path = create_directory(os.path.join(self.train_path,"postprocess"))
-
-        # inside the train_path create a folder to save the  plots
         self.plot_save_path = create_directory(os.path.join(self.train_path,"plots"))
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Cuda is {torch.cuda.is_available()}")
+        self.model = self.config.model
+        if torch.cuda.device_count() > 1:
+            print("Let's use", torch.cuda.device_count(), "GPUs!")
+            self.model = torch.nn.DataParallel(self.model)
+        self.model.to(self.device)
+        self.loss = self.config.loss
+        print("\nExecutor initialized\n")
     def rescale(self):
         self.rescaled_path=os.path.join(self.main_path,self.geometry_name+"_rescaled.stl")
         # if the rescaled file exists then use that
@@ -66,9 +75,10 @@ class Executor:
             print("Rescaled file already exists")
         return self.rescaled_path
     def sampling(self):
-        if os.path.exists(os.path.join(self.data_path,"uniform.csv")) or os.path.exists(os.path.join(self.data_path,"surface.csv")) or os.path.exists(os.path.join(self.data_path,"narrow")):
-            print("Sampling already done")
-            return
+        if not self.config.continue_sampling:
+            if os.path.exists(os.path.join(self.data_path,"uniform.csv")) or os.path.exists(os.path.join(self.data_path,"surface.csv")) or os.path.exists(os.path.join(self.data_path,"narrow")):
+                print("Sampling already done")
+                return
         elif self.config.distributed:
             data_generator.write_signed_distance_distributed(self.config.geometry,self.data_path,self.config.uniform_points,self.config.surface,self.config.narrowband,self.config.narrowband_width)
             print("Distributed sampling done")
@@ -86,6 +96,7 @@ class Executor:
         # already in the class variables
         training_dataloader, validation_dataloader = load_data.load_data(self.data_path,self.config,self.device)
         # optimizer is used as provided in the config
+        print(self.config.lr)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.lr)
         if self.device == 'cuda':
             torch.cuda.empty_cache()
@@ -103,25 +114,30 @@ class Executor:
         self.model.train()
         counter = 0
         for i in range(start_epoch, int(self.config.epochs)):
+            loss=0
             train_loss = 0
+            val_loss = 0
             torch.cuda.empty_cache()
             for batch, (x_batch, y_batch) in enumerate(training_dataloader):
-                optimizer.zero_grad()
                 loss = self.loss(x_batch, y_batch, self.model,i)
+                optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
-            train_loss /= len(training_dataloader)
+            torch.cuda.empty_cache()
+            train_loss = train_loss/len(training_dataloader)
             loss_per_epoch.append(train_loss)
             val_loss = 0
             for batch, (x_batch, y_batch) in enumerate(validation_dataloader):
                 loss = self.loss(x_batch, y_batch, self.model,i)
                 val_loss += loss.item()
-            val_loss /= len(validation_dataloader)
+            val_loss = val_loss/len(validation_dataloader)
             val_loss_per_epoch.append(val_loss)
             # write this to a file 
+            str_to_write = f"Epoch {i+1}/{self.config.epochs}: train loss {train_loss} validation loss {val_loss}\n"
+            print(str_to_write)
             with open(os.path.join(self.train_path,"train_loss.txt"),"a") as f:
-                f.write(f"Epoch {i+1}/{self.config.epochs}: train loss {train_loss} validation loss {val_loss}\n")
+                f.write(str_to_write)
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
@@ -145,6 +161,7 @@ class Executor:
                 ax.set_title('Loss vs Epochs')
                 ax.set_xlabel('Epochs')
                 ax.set_ylabel('Loss')
+                ax.legend() 
                 fig.savefig(os.path.join(self.plot_save_path, f"loss{i}.png"))
                 plt.close(fig)
 
@@ -171,7 +188,7 @@ class Executor:
             pickle.dump(checkpoint_data, checkpoint_file)   
     def load_model(self,model,optimizer,save_path,best = False):
         if best:
-            checkpoint_path = os.path.join(save_path, "best_model.pkl")
+            checkpoint_path = os.path.join(self.model_save_path, "best_model.pkl")
             with open(checkpoint_path, 'rb') as checkpoint_file:
                 checkpoint_data = pickle.load(checkpoint_file)
             model = self.model_device_handler(model,checkpoint_data['model_state_dict'])
@@ -227,10 +244,13 @@ class Executor:
         xx, yy, zz = torch.meshgrid(x, x, x, indexing='ij')
         # Reshape the coordinates to create a DataFrame
         coordinates = torch.stack((xx, yy, zz), dim=-1).reshape(-1, 3).to(self.device)
-        batch_size = self.conf.ppbatchsize  # Adjust based on available memory
+        batch_size = self.config.ppbatchsize  # Adjust based on available memory
         sdf_values = []
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.lr)
-        self.model, epoch = self.load_model(self.model,optimizer,self.model_save_path,best=True)
+        print("Loading the best model\n\n")
+        print(f"Loading model from {self.model_save_path}")
+        print("\n\n")
+        self.model,_, epoch, _, _, _ = self.load_model(self.model,optimizer,self.model_save_path,True)
         self.model.eval()
         with torch.no_grad():
             for i in range(0, coordinates.shape[0], batch_size):
@@ -243,7 +263,7 @@ class Executor:
         sdf_values = torch.cat(sdf_values)
         # Reshape the SDF values array to match the volume shape
         sdf_values = sdf_values.cpu().numpy().reshape(volume_size)
-        verts, faces, normals, _ = igl.marching_cubes(sdf_values, level=0.0,spacing=spacing)
+        verts, faces, normals, _ = marching_cubes(sdf_values, level=0.0,spacing=spacing)
         print(f"Mesh generated for cube size {self.config.cubesize}")
         if self.config.rescale:
             # save the mesh
@@ -252,22 +272,23 @@ class Executor:
         # save the mesh
         mesh = trimesh.Trimesh(vertices=verts, faces=faces, vertex_normals=normals)
         # mesh.export(os.path.join(save_directory, f"output_mesh{i}.stl"), file_type='stl')
-        print(f"Saving mesh to {os.path.join(self.postprocess_save_path, f'{ self.geometry_name}_resconstructed_{epoch}.stl')}")
-        mesh.export(os.path.join(self.postprocess_save_path, f"{self.geometry_name}_resconstructed_{epoch}_cube_{self.config.cubesize}.stl"), file_type='stl') 
+        path_to_save = os.path.join(self.postprocess_save_path, f"{self.geometry_name}_resconstructed_{epoch}_cube_{self.config.cubesize}.stl")
+        print(f"Saving mesh to {path_to_save}")
+        mesh.export(path_to_save, file_type='stl') 
+        plot_stl(path_to_save,os.path.join(self.postprocess_save_path, f"{self.geometry_name}_resconstructed_{epoch}_cube_{self.config.cubesize}.gif"))
     def run(self):
+        print("Running the executor")
         if self.config.samplingonly:
             print("Sampling only")
             self.sampling()
-            return
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = self.config.model
-        if torch.cuda.device_count() > 1:
-            print("Let's use", torch.cuda.device_count(), "GPUs!")
-            self.model = torch.nn.DataParallel(self.model)
-        self.model.to(self.device)
-        self.loss = self.config.loss
+            return        # inside the train_path create a folder to save the  plots
+
         if self.config.ppo:
             print("PPO only")
+            if self.config.reconstruct:
+                print("Reconstructing only")
+                self.reconstruct_only()
+                return
             post_process.post_process(self)
             return
         self.train()

@@ -33,20 +33,23 @@ def load_data(data_path, config, device):
     # Create a list of data frames to concatenate, subject to the condition
     dfs_to_concat = [df for df in [df_uniform_points, df_on_surface, df_narrow_band, df_additional] if len(df) > 1]
 
-
     # Concatenate the data frames in the list if there are more than one
     df = pd.concat(dfs_to_concat, ignore_index=True)
+    df = df.drop(columns=["Unnamed: 0"])
+
     total_points = len(df)
     print(f"Total points in the dataset: {total_points}")
-    feature_columns = df.columns[1:-4]
+    print(f"Total points in the dataset: {len(df)}")
+    feature_columns = df.columns[0:-4]
     target_column = df.columns[-4:]
-    print(feature_columns)
-    print(target_column)
     print("traint_test_split_value", config.train_test_split)
     print(df[feature_columns].shape)
     print(df[target_column].shape)
     X_train, val_X, y_train, val_Y = train_test_split(df[feature_columns], df[target_column], test_size=config.train_test_split, random_state=RANDOM_SEED_TEST_SPLIT)
-
+    print("X_train", X_train.shape)
+    print("val_X", val_X.shape)
+    print("y_train", y_train.shape)
+    print("val_Y", val_Y.shape)
     X = torch.tensor(X_train.values, dtype=torch.float32).to(device)
     Y = torch.tensor(y_train.values, dtype=torch.float32).to(device)
     val_X = torch.tensor(val_X.values, dtype=torch.float32).to(device)
@@ -56,5 +59,5 @@ def load_data(data_path, config, device):
     training_dataloader = torch.utils.data.DataLoader(training_dataset, batch_size=config.batchsize, shuffle=True)
     validation_dataset = torch.utils.data.TensorDataset(val_X, val_Y)
     validation_dataloader = torch.utils.data.DataLoader(validation_dataset, batch_size=config.batchsize, shuffle=True)
-
+    
     return training_dataloader, validation_dataloader
