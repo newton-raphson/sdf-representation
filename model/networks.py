@@ -82,6 +82,7 @@ class ImplicitNet(nn.Module):
         # vanilla relu
         else:
             self.activation = nn.ReLU()
+        self.tanh = nn.Tanh()
     def __name__(self):
         return "ImplicitNet"
     def forward(self, input):
@@ -102,7 +103,7 @@ class ImplicitNet(nn.Module):
             # If the activation is ReLU
             elif isinstance(self.activation, nn.ReLU):  
                  # Apply tanh activation in the last layer to make it work as a FCN as described in the paper
-                x = nn.Tanh()(x)
+                x = self.tanh(x)
         return x
     # normalization for lipsitch implementation 
     # not tested for this project
@@ -161,6 +162,7 @@ class ImplicitNetCompatible(nn.Module):
         # vanilla relu
         else:
             self.activation = nn.ReLU()
+        
 
     def forward(self, input):
 
