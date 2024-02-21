@@ -54,6 +54,28 @@ def create_narrow_band(uniform_points, triangle_coords, width=0.1):
     point = u * triangle_coords[0] + v * triangle_coords[1] + w * triangle_coords[2]
     return point + normal_width
 
+def create_narrow_band_distribute(uniform_points, triangle_coords, width):
+    """
+    Creates a narrow band around a given triangle using uniform points and triangle coordinates.
+
+    Args:
+        uniform_points (tuple): A tuple of three uniform points.
+        triangle_coords (list): A list of three coordinates representing the triangle.
+        width (float, optional): The width of the narrow band. Defaults to 0.1.
+
+    Returns:
+        numpy.ndarray: narrow band point in both directions from normal of the triange.
+        numpy.ndarrat: corresponding norma
+    """
+    # print(triangle_coords.shape)
+    normal = calculate_normal(triangle_coords)
+
+    # print({normal.shape,width.shape})
+    normal_width = normal*width
+    u, v, w = uniform_points
+    point = u * triangle_coords[0] + v * triangle_coords[1] + w * triangle_coords[2]
+    return point + normal_width,normal
+
 def calculate_normal(triangle):
     """
     Calculates the normal vector of a triangle defined by three points.
@@ -67,7 +89,11 @@ def calculate_normal(triangle):
     AB = triangle[1] - triangle[0]
     AC = triangle[2] - triangle[0]
     normal = np.cross(AB, AC)
+    mag = np.linalg.norm(normal)
+    if mag ==0:
+        return 
     return normal / np.linalg.norm(normal)
+# let's define a function which takes a triangle 
 # Not used 
 # Tested but didn't work
 
@@ -206,7 +232,7 @@ def write_signed_distance_mismatch(query_points, geometry_path):
 # DAVID with 1 billion triangles
 
 
-def write_signed_distance_distributed(geometry_path, data_path, num_points_uniform, num_points_surface, num_points_narrow_band, dense_width=0.1, additional_points=0, path=None):
+def write_signed_distance_distributed(geometry_path, data_path, num_points_uniform=0, num_points_surface=0, num_points_narrow_band=0, dense_width=0.1, additional_points=0, path=None):
     """
     Writes signed distance data to CSV files for a given set of geometry files.
 
@@ -224,6 +250,9 @@ def write_signed_distance_distributed(geometry_path, data_path, num_points_unifo
     Returns:
     - bool: True if the signed distance data is successfully written to the CSV files, otherwise function fails
     """
+    ####### set the randomizer #####################
+    np.random.seed(RANDOM_SEED_DATA_GENERATION)
+    ################################################
     # list all the files in the directory
     files = glob.glob(geometry_path+"/*")
     print(f"Number of files is {len(files)}")
@@ -263,25 +292,75 @@ def write_signed_distance_distributed(geometry_path, data_path, num_points_unifo
 
             # rescale the .ply file vertices to be between -1 and 1
             mesh = trimesh.load(file)
-            mesh.vertices = (mesh.vertices - min_val)/(max_val-min_val)
-            mesh.export(file)
-            # generate the signed distance data
-            df_uniform_points, df_on_surface, df_narrow_band = generate_signed_distance_data(
-                file,
-                num_points_uniform,
-                num_points_surface,
-                num_points_narrow_band,
-                dense_width,
-                additional_points,
-                distributed=True
-            )
+            # check point if the mesh is corrupted or not
+            if len(mesh.vertices)==1 or len(mesh.faces)==1:
+                print(f"\n Continuing: veritces {len(mesh.vertices)},faces {len(mesh.faces)}  \n")
+                continue
+            # mesh.vertices = (mesh.vertices - min_val)/(max_val-min_val)
+            v,f = mesh.vertices, mesh.faces
+            # for on surface
+            query_on_surface = np.array(v)
+            df_on_surface = pd.DataFrame(query_on_surface, columns=['x', 'y', 'z'])
+            # df_on_surface=df_on_surface.apply(pd.to_numeric, errors='coerce')
+            # df_on_surface=df_on_surface.dropna()
+            # S_surface = np.zeros(len(query_on_surface))
+            # # no normal at all
+            # n_surface = np.zeros_like(query_on_surface)
+            # print("Saving")
+            # data_surface = np.column_stack((query_on_surface, S_surface,n_surface))
+            # df_on_surface = pd.DataFrame(data_surface, columns=['x', 'y', 'z', 'S','nx','ny','nz'])
+            
+            # # take each triangle and get a point  
+            # uniform_narrow_points = np.random.uniform(0, 1, size=(len(f), 3))
+            # # to get to the barycentric co-ordinate system
+            # uniform_narrow_points /= np.sum(uniform_narrow_points, axis=1, keepdims=True)
+            # print(f"The length of narrow_points is {len(uniform_narrow_points)}")
+            # # let's take it as 10% of the width
+            # width_threshold = 0.1 *np.abs(np.max(v)-np.min(v))
+            # uniform_width = np.random.uniform(-width_threshold, width_threshold, size=len(f))
+            # query_points_narrow=[]
+            # normal_narrow=[]
+            # total_triangle = len(f)
+            # for i,triangle in enumerate(v[f]):  
+            #     print(f"\n The Triangles is {i}/{total_triangle}")
+            #     points_narrow, normal=create_narrow_band_distribute(uniform_narrow_points[i],triangle,uniform_width[i])
+            #     print(points_narrow)
+            #     print("\n")
+            #     query_points_narrow.append(points_narrow)
+            #     normal_narrow.append(normal)
+            #     if i==50:
+            #         break
+            # # get the point the Signed distance value is the value of the normal
+            # # the normal is that value calculated 
+            # # create df for this
+            # query_on_surface = np.array(query_points_narrow)
+            # S_narrow = np.array(uniform_width).reshape(len(query_on_surface),1)
+            # # no normal at all
+            # n_narrow = np.array(normal_narrow)
+            # data_narrow = np.column_stack((query_on_surface, S_narrow,n_narrow))
+            # df_narrow_band = pd.DataFrame(data_narrow, columns=['x', 'y', 'z', 'S','nx','ny','nz'])
+
+            # mesh.export(file)
+            # we just want to take the vertices and corresponding normals
+
+            # # generate the signed distance data
+            # df_uniform_points, df_on_surface, df_narrow_band = generate_signed_distance_data(
+            #     file,
+            #     num_points_uniform,
+            #     num_points_surface,
+            #     num_points_narrow_band,
+            #     dense_width,
+            #     additional_points,
+            #     distributed=True
+            # )
             # append the data to the csv file
-            df_uniform_points.to_csv(os.path.join(data_path,"uniform.csv"),mode='a',index=False)
+            # df_uniform_points.to_csv(os.path.join(data_path,"uniform.csv"),mode='a',index=False)
             df_on_surface.to_csv(os.path.join(data_path,"surface.csv"),mode='a',index=False)
-            df_narrow_band.to_csv(os.path.join(data_path,"narrow.csv"),mode='a',index=False)
+            # df_narrow_band.to_csv(os.path.join(data_path,"narrow.csv"),mode='a',index=False)
             # add the file to the processed files
             with open(log_file_path, "a") as log_file:
                 log_file.write(file + "\n")
+
     return True
 
 # main function to generate signed distance data
@@ -391,7 +470,6 @@ def generate_signed_distance_data(geometry,num_points_uniform, num_points_surfac
     # print("uniform points generated and signed distance computed")
     # df_on_surface = write_signed_distance(query_on_surface, v, f,"surface")
     df_narrow_band = write_signed_distance(query_narrow_band, v, f,"narrow_band")
-    print("point generation completed")
     return df_uniform_points, df_on_surface, df_narrow_band
 
 def parse_args():

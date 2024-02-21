@@ -169,3 +169,6 @@ def compute_normal(model, pj):
         retain_graph=True,
         only_inputs=True)[0][:, -3:]
     return points_grad
+
+
+##### Testin Loss Functions #####

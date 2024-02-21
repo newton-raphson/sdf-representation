@@ -1,5 +1,4 @@
-# Signed Distance Representation of CAD Geometry (sdf-representation)
-
+# Implicit Representation for Octree-mesh construction
 This repository contains the code and resources for representing CAD (Computer-Aided Design) geometry using Signed Distance Functions (SDFs).
 
 

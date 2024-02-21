@@ -66,8 +66,8 @@ def post_process(executor):
         sdf_values = []
         print(f"Generating SDF values for cube size {volume_size[0]}")
         S=np.array([])
-        executor.config.threshold1 = 0.01
-        executor.config.threshold2 = 0.00025
+        threshold1 = 0.01
+        threshold2 = 0.00025
         predicted_labels1 = []
         actual_labels1 =[]
         predicted_labels2 = []
@@ -210,6 +210,3 @@ def post_process(executor):
         print(f"An error occurred: {str(e)}")
         return 1000
 
-    args = parse_args()
-    print(args.num_hidden_layers)
-    reconstruct_mesh(args.directory,args.model,args.cube,args.num_hidden_layers,args.hidden_dim,args.geometry)

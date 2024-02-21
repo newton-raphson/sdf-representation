@@ -16,21 +16,30 @@ class Configuration:
         
         # MODEL PARAMS 
         model = getattr(networks,self.config.get("Model","model"))
-        # for model
-        self.hidden_dim = self.config.getint("Model","hidden_dim")
-        self.num_hidden_layers = self.config.getint("Model","num_hidden_layers")
-        dims = [self.hidden_dim for i in range(self.num_hidden_layers)]
-        self.input_dim = self.config.getint("Model","input_dim")
-        val = self.config.getint("Model","skip_connection")
-        if val == 0:
+        if self.config.get("Model","model")=="ImplicitNet" :
+            # for model
+            self.hidden_dim = self.config.getint("Model","hidden_dim")
+            self.num_hidden_layers = self.config.getint("Model","num_hidden_layers")
+            dims = [self.hidden_dim for i in range(self.num_hidden_layers)]
+            self.input_dim = self.config.getint("Model","input_dim")
+            val = self.config.getint("Model","skip_connection")
+            if val == 0:
+                self.skip_connection = ()
+                self.beta = 0
+            else:
+                self.skip_connection = (val,)
+                self.beta = self.config.getfloat("Model","beta")
+            self.geometric_init = self.config.getboolean("Model","geometric_init")
+            print("skip_connection",self.skip_connection)
+            self.model = model(self.input_dim,dims,self.skip_connection,self.beta,self.geometric_init)
+        if self.config.get("Model","model") == "FeedForwardNetwork":
+            self.hidden_dim = self.config.getint("Model","hidden_dim")
+            self.num_hidden_layers = self.config.getint("Model","num_hidden_layers")
+            self.input_dim = self.config.getint("Model","input_dim")
+            self.model = model(self.input_dim,self.hidden_dim,self.num_hidden_layers,)
             self.skip_connection = ()
             self.beta = 0
-        else:
-            self.skip_connection = (val,)
-            self.beta = self.config.getfloat("Model","beta")
-        self.geometric_init = self.config.getboolean("Model","geometric_init")
-        print("skip_connection",self.skip_connection)
-        self.model = model(self.input_dim,dims,self.skip_connection,self.beta,self.geometric_init)
+            self.geometric_init= False
         print(self.model)
         # LOSS PARAMS
         self.loss = self.get_loss_function()
@@ -79,3 +88,5 @@ class Configuration:
             return loss_function_class(**parameters)
         else:
             raise ValueError(f"Unsupported loss function: {loss_function_name}")
+
+

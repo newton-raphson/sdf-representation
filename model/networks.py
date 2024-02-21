@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 import math
+from torch.nn.utils import weight_norm
+
 class ImplicitNet(nn.Module):
     """_summary_
     This class defines the architecture of the implicit network which can be 
@@ -82,7 +84,12 @@ class ImplicitNet(nn.Module):
         # vanilla relu
         else:
             self.activation = nn.ReLU()
-        self.tanh = nn.Tanh()
+
+        # just for testing let's get the skip_in value layer previously generated
+        # val = np.load("/work/mech-ai-scratch/samundra/experiments/sdf_representation_test/visualizing.npy")
+        # self.skipin_val = torch.tensor(val[0])
+        # self.skipin_val = self.skipin_val.view(1,self.skipin_val.size(0))
+        # print("skipin_val_shape",self.skipin_val.shape)
     def __name__(self):
         return "ImplicitNet"
     def forward(self, input):
@@ -93,17 +100,25 @@ class ImplicitNet(nn.Module):
             lin = getattr(self, "lin" + str(layer))
 
             if layer in self.skip_in:
+                # print(x)
+                # print("\n")
+                # y= x.clone()
+                # print(y)
+                # np.save(f"/work/mech-ai-scratch/samundra/experiments/sdf_representation_test/visualizing.npy", y.detach().cpu().numpy())
+                # print("skipin_val",self.skipin_val.shape)
+                # print("input",input.shape)
+                # val = self.skipin_val.repeat(input.size(0), 1)
+                # x = torch.cat([val, input], -1) / np.sqrt(2)
                 x = torch.cat([x, input], -1) / np.sqrt(2)
+
             if self.lipsitch:
                 self.normalization(lin.parameters(),1/self.ci[layer]*nn.softplus(beta=self.ci[layer]))
             
             x = lin(x)
             if layer < self.num_layers - 2:
                 x = self.activation(x)
-            # If the activation is ReLU
-            elif isinstance(self.activation, nn.ReLU):  
-                 # Apply tanh activation in the last layer to make it work as a FCN as described in the paper
-                x = self.tanh(x)
+            # save each layer into npy files 
+            
         return x
     # normalization for lipsitch implementation 
     # not tested for this project
@@ -187,27 +202,29 @@ class ImplicitNetCompatible(nn.Module):
 #     def forward(self, x):
 #         return torch.sin(torch.pi*x)
 
-# class FeedForwardNetwork(nn.Module):
-#     def __init__(self, input_dim=3, hidden_dim=512, num_layers=8):
-#         super(FeedForwardNetwork, self).__init__()
-#         self.layers = nn.ModuleList()
+class FeedForwardNetwork(nn.Module):
+    def __init__(self, input_dim=3, hidden_dim=512, num_layers=8):
+        super(FeedForwardNetwork, self).__init__()
+        self.layers = nn.ModuleList()
 
-#         for _ in range(num_layers):
-#             self.layers.append(nn.Sequential(
-#                 weight_norm(nn.Linear(input_dim, hidden_dim)),
-#                 nn.ReLU(),
-#                 nn.Dropout(p=0.5)  # You can adjust the dropout probability as needed
-#             ))
-#             input_dim = hidden_dim  # Update input dimension for subsequent layers
+        for _ in range(num_layers):
+            self.layers.append(nn.Sequential(
+                weight_norm(nn.Linear(input_dim, hidden_dim)),
+                nn.ReLU(),
+                nn.Dropout(p=0.5)  # You can adjust the dropout probability as needed
+            ))
+            input_dim = hidden_dim  # Update input dimension for subsequent layers
 
-#         self.output_layer = nn.Sequential(
-#             weight_norm(nn.Linear(hidden_dim, 1)),  # Output a single SDF value
-#             nn.Tanh()  # Apply tanh activation
-#         )
+        self.output_layer = nn.Sequential(
+            weight_norm(nn.Linear(hidden_dim, 1)),  # Output a single SDF value
+            nn.Tanh()  # Apply tanh activation
+        )
 
-#     def forward(self, x):
-#         for layer in self.layers:
-#             x = layer(x)
-#         sdf_value = self.output_layer(x)
-#         return sdf_value
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        sdf_value = self.output_layer(x)
+        return sdf_value
+    def __name__(self):
+        return "FeedForwardNetwork"
 
