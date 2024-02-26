@@ -53,7 +53,7 @@ int main(int argc, const char* argv[]) {
         }
 
         // Wrap the input tensor in a torch::autograd::Variable for gradient computation
-        torch::autograd::Variable input_variable(input_tensor, true);
+        torch::autograd::Variable input_variable(input_tensor);
 
         // Execute the model and get the output variable
         torch::autograd::Variable output_variable = module.forward({input_variable}).toTensor();
@@ -82,16 +82,26 @@ int main(int argc, const char* argv[]) {
         }
 
         // Wrap the target output tensor in a torch::autograd::Variable for gradient computation
-        torch::autograd::Variable target_output_variable(target_output_tensor, true);
-
+        torch::autograd::Variable target_output_variable(target_output_tensor);
+        target_output_variable.set_requires_grad(true);
         // Compute the mean squared error loss
         torch::Tensor loss_tensor = torch::mse_loss(output_variable, target_output_variable);
 
         // Backward pass to compute gradients
         loss_tensor.backward();
-
+                // Check if gradient computation is enabled for target_output_variable
+        if (!target_output_variable.requires_grad()) {
+            std::cerr << "Error: Gradient computation is not enabled for target_output_variable\n";
+            return -1;
+        }
         // Get the gradients from the input_variable
-        torch::Tensor gradient = input_variable.grad();
+        torch::Tensor gradient_input = input_variable.grad();
+
+        torch::Tensor gradient_output = target_output_variable.grad();
+
+        // calculate the gradient of output with respect to the input
+        torch::Tensor gradient = gradient_input/gradient_output;
+
 
         // Convert the gradient to a std::vector for printing
         std::vector<float> gradient_vector(gradient.data_ptr<float>(), gradient.data_ptr<float>() + gradient.numel());
