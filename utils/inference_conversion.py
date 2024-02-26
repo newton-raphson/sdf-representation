@@ -46,6 +46,7 @@ def save_as_libtorch(path_chk,hidden_dim,num_hidden_layers,save_path):
     # Load the modified state_dict into your model
     model.load_state_dict(new_state_dict)
     model.eval()
+    
     sm = torch.jit.script(model)
 
     sm.save("/work/mech-ai-scratch/samundra/projects/sdf-representation/ops/conversion_test/implicit_model.pt")

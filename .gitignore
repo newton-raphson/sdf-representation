@@ -1,6 +1,10 @@
 *.pkl 
 *.npy
 *.pt 
+*.stl 
+*.obj
+*.csv
+
 Makefile
 # Byte-compiled / optimized / DLL files
 __pycache__/

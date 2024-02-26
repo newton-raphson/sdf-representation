@@ -1,0 +1,28 @@
+#################### Refinement setting ####################
+basisFunction = "linear" # "quadratic"
+refine_lvl_uni = 3
+refine_lvl_bd = 3
+
+#################### Geometry setting ####################
+# Cube Domain
+cubeDomainMin = [-1.0, -1.0, -1.0]
+cubeDomainMax = [1.0, 1.0, 1.0]
+
+# Physical Domain
+physDomainMin = [-1.0, -1.0, -1.0]
+physDomainMax = [1.0, 1.0, 1.0]
+
+#################### 2ِD Geometry setting ####################
+
+# Mesh-3 .msh file name and retain side
+mshFileName = "example.msh"
+mshRetainInside = false
+
+
+#################### 3ِD Geometry setting ####################
+
+# .stl file name and retain side
+stlFileName = "pipe.stl"
+ModelFileName = "model.onnx"
+useDeepLearning = false
+stlRetainInside = true

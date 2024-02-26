@@ -14,7 +14,6 @@ int main(int argc, const char* argv[]) {
     try {
         // Deserialize the ScriptModule from a file using torch::jit::load().
         module = torch::jit::load(argv[1]);
-
         // Read input from input.csv
         std::ifstream input_file("input.csv");
         if (!input_file.is_open()) {
@@ -33,6 +32,7 @@ int main(int argc, const char* argv[]) {
             while (std::getline(ss, cell, ',')) {
                 row.push_back(std::stof(cell));
             }
+            std::cout << "row: " << row << '\n';
             input_data.push_back(row);
         }
 
@@ -40,16 +40,22 @@ int main(int argc, const char* argv[]) {
         input_file.close();
 
         // Convert input_data to a torch::Tensor
-        torch::Tensor input_tensor = torch::from_blob(input_data.data(), {input_data.size(), input_data[0].size()}, torch::kFloat32);
+        torch::Tensor input_tensor = torch::empty({input_data.size(), input_data[0].size()}, torch::kFloat32);
 
+      for (size_t i = 0; i < input_data.size(); ++i) {
+        for (size_t j = 0; j < input_data[0].size(); ++j) {
+          input_tensor[i][j] = input_data[i][j];
+          }
+        }
         // Wrap the input tensor in a vector of IValue.
         std::vector<torch::jit::IValue> inputs;
         inputs.push_back(input_tensor);
+        // std::cout << "input_tensor: " << input_tensor << '\n';
 
         // Execute the model and turn its output into a tensor.
         at::Tensor output = module.forward(inputs).toTensor();
 
-
+        // std::cout << "output: " << output << '\n';
         // Read output from output.csv
         std::ifstream output_file("output.csv");
         if (!output_file.is_open()) {
@@ -67,12 +73,17 @@ int main(int argc, const char* argv[]) {
         output_file.close();
 
         // Convert output_data to a torch::Tensor
-        torch::Tensor target_output_tensor = torch::from_blob(output_data.data(), {output_data.size()}, torch::kFloat32);
+         
+        torch::Tensor target_output_tensor = torch::empty({output_data.size()}, torch::kFloat32);
 
+        for (size_t i = 0; i < output_data.size(); ++i) {
+            target_output_tensor[i] = output_data[i];
+        }
+         std::cout << "target_output_tensor: " << target_output_tensor << '\n';
         // Compute the difference between the model output and the target output
         torch::Tensor difference = output - target_output_tensor;
 
-        // Print the difference
+        // // Print the difference
         std::cout << "Difference between model output and target output:\n" << difference << '\n';
 
         // Save the difference to a difference.csv file

@@ -241,7 +241,7 @@ class Executor:
         else:
             print(f"Looking for model in {save_path}")
             model_files = glob.glob(save_path + '/model_epoch*.pkl')
-            print(f"Model files found {model_files}")
+            # print(f"Model files found {model_files}")
             if len(model_files) == 0:
                 print("No model found")
                 raise FileNotFoundError
