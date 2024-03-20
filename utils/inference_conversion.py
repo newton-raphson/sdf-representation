@@ -49,7 +49,7 @@ def save_as_libtorch(path_chk,hidden_dim,num_hidden_layers,save_path):
     
     sm = torch.jit.script(model)
 
-    sm.save("/work/mech-ai-scratch/samundra/projects/sdf-representation/ops/conversion_test/implicit_model.pt")
+    sm.save(os.path.join(save_path,"implicit_model.pt"))
     # testing the model with 0.5,0.5,0.5
 
     output = model(test_input)
@@ -60,8 +60,10 @@ def save_as_libtorch(path_chk,hidden_dim,num_hidden_layers,save_path):
     output = model(input_tensor)
 
     # save the output and input in a csv file
-    np.savetxt('/work/mech-ai-scratch/samundra/projects/sdf-representation/ops/conversion_test/output.csv', output.detach().numpy(), delimiter=',')
-    np.savetxt('/work/mech-ai-scratch/samundra/projects/sdf-representation/ops/conversion_test/input.csv', input_tensor.detach().numpy(), delimiter=',')
+    np.savetxt(os.path.join(save_path,'output.csv'), output.detach().numpy(), delimiter=',')
+    np.savetxt(os.path.join(save_path,'input.csv'), input_tensor.detach().numpy(), delimiter=',')
+
+
 
 
 def save_as_onxx(path_chk,hidden_dim,num_hidden_layers,save_path):

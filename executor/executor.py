@@ -18,6 +18,7 @@ from model.networks import FeedForwardNetwork,ImplicitNet
 from model.losses import WeightedSmoothL2Loss
 from utils.pickling import CPU_Unpickler
 import glob
+from torch.optim.lr_scheduler import StepLR
 class Executor:
     def __init__(self, config):
         self.config = config
@@ -116,6 +117,9 @@ class Executor:
 
         # model = self.model
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.lr)
+        # ##################### ADDED FOR TESTING ############################
+        scheduler = StepLR(optimizer, step_size=50, gamma=0.1)
+        # ####################################################################
         if self.device == 'cuda':
             torch.cuda.empty_cache()
         if self.config.contd:
@@ -151,6 +155,8 @@ class Executor:
                 # train_loss += loss.item()
                 del x_batch
                 del y_batch
+            # take a step in the scheduler
+            scheduler.step()
             torch.cuda.empty_cache()
             train_loss = train_loss/len(training_dataloader)
             loss_per_epoch.append(train_loss)

@@ -171,4 +171,4 @@ def compute_normal(model, pj):
     return points_grad
 
 
-##### Testin Loss Functions #####
+

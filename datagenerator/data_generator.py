@@ -49,7 +49,10 @@ def create_narrow_band(uniform_points, triangle_coords, width=0.1):
     Returns:
         numpy.ndarray: narrow band point in both directions from normal of the triange.
     """
-    normal_width = calculate_normal(triangle_coords) * width
+    normal = calculate_normal(triangle_coords)
+    if normal is None:
+        normal = np.array([0,0,0])
+    normal_width = normal* width
     u, v, w = uniform_points
     point = u * triangle_coords[0] + v * triangle_coords[1] + w * triangle_coords[2]
     return point + normal_width
@@ -71,6 +74,10 @@ def create_narrow_band_distribute(uniform_points, triangle_coords, width):
     normal = calculate_normal(triangle_coords)
 
     # print({normal.shape,width.shape})
+    # replace NoneType with 0
+    if normal is None:
+        normal = np.array([0,0,0])
+
     normal_width = normal*width
     u, v, w = uniform_points
     point = u * triangle_coords[0] + v * triangle_coords[1] + w * triangle_coords[2]
@@ -93,6 +100,37 @@ def calculate_normal(triangle):
     if mag ==0:
         return 
     return normal / np.linalg.norm(normal)
+
+
+# Function to generate points near the axes intersection
+def generate_points_near_axes(radius, num_points):
+    # Define the axes intersection points
+    axes_points = np.array([
+        [0, 0, radius],   # Positive z-axis
+        [0, 0, -radius],  # Negative z-axis
+        [0, radius, 0],   # Positive y-axis
+        [0, -radius, 0],  # Negative y-axis
+        [radius, 0, 0],   # Positive x-axis
+        [-radius, 0, 0]   # Negative x-axis
+    ])
+
+    # Generate additional points near the axes intersection
+    additional_points = np.random.normal(loc=0, scale=0.001, size=(num_points, 3))
+    additional_points *= radius / np.linalg.norm(additional_points, axis=1)[:, np.newaxis]
+
+    # Repeat the axes points for each additional point
+    axes_points_repeated = np.repeat(axes_points, num_points, axis=0)
+
+    # Reshape the axes_points_repeated array to match the shape of additional_points for proper addition
+    axes_points_reshaped = np.reshape(axes_points_repeated, (len(axes_points), num_points, 3))
+
+    # Add the additional points to the axes points
+    axes_nearby_points = axes_points_reshaped + additional_points
+
+    # Reshape the axes_nearby_points array to match the desired output shape
+    axes_nearby_points = np.reshape(axes_nearby_points, (-1, 3))
+
+    return axes_nearby_points
 # let's define a function which takes a triangle 
 # Not used 
 # Tested but didn't work
@@ -102,7 +140,35 @@ def calculate_normal(triangle):
 #     # Average mean curvature values for vertices that belong to each triangle
 #     triangle_mean_curvature = [np.mean(mean_curvature[triangle]) for triangle in f]
 #     return np.array(triangle_mean_curvature)
+def generate_signed_distance(query_points, geometry_path):
+    mesh = trimesh.load(geometry_path)
+    v, f = mesh.vertices, mesh.faces
+    if query_points.shape[0] == 0:
+        query_points = np.array([[0, 0, 0]], dtype=np.float32)  # Convert to float32
+        S, _, _,n = igl.signed_distance(query_points, v, f, return_normals=True)
+        S=np.array([-0.5])
+        n=np.array([[0,0,0]])
+    else:
+        if len(query_points)> 500000:
+            print("The points are more than 500000")
+            batch_size = 100000
+            S=np.array([])
+            for i in range(0, len(query_points), batch_size):
+                S_in, _, _,n_in = igl.signed_distance(query_points[i:i+batch_size], v, f, return_normals=True)
+                print(f"Shapes of S in is {S_in.shape} and n is {n_in.shape}")
+                S=np.append(S,S_in)
+                if i==0:
+                    n=np.array(n_in)
+                else:
+                    n_in = np.array(n_in)
+                    n= np.concatenate((n,n_in),axis=0)
 
+        else:
+            S, _, _,n = igl.signed_distance(query_points, v, f, return_normals=True)
+    print(f"Shapes of S is {S.shape} and {n.shape}")
+    data = np.column_stack((query_points, S,n))
+    df = pd.DataFrame(data, columns=['x', 'y', 'z', 'S','nx','ny','nz'])
+    return df
 
 def generate_test_points(v,f,size_cube):
     np.meshgrid()
@@ -192,6 +258,84 @@ def compute_min_max(geometry_path):
             f.write(str(max_val)+"\n")
             f.write(str(min_val)+"\n")
     return max_val,min_val
+
+def generate_analytical_sphere(uniform_points,narrow_points,on_surface_points,save_path):
+
+    # take a radius equal to our previous radius
+    radius = 0.85
+
+    # generate random uniform points between -1 and 1 using r,theta,phi and convert to cartesian
+    r = np.random.uniform(-1, 1, size=uniform_points)
+    theta = np.random.uniform(0, 2 * np.pi, size=uniform_points)
+    phi = np.random.uniform(0, np.pi, size=uniform_points)
+    x = r * np.sin(phi) * np.cos(theta)
+    y = r * np.sin(phi) * np.sin(theta)
+    z = r * np.cos(phi)
+    uniform_points = np.column_stack((x, y, z))
+    # save the uniform points with the signed distance 
+    S_uniform = np.linalg.norm(uniform_points, axis=1) - radius
+    # normal at the particular point is the point itself
+    n_uniform = uniform_points
+    data_uniform = np.column_stack((uniform_points, S_uniform,n_uniform))
+    df_uniform = pd.DataFrame(data_uniform, columns=['x', 'y', 'z', 'S','nx','ny','nz'])
+    
+    # generate random narrow points between -1 and 1 using r,theta,phi and convert to cartesian]
+    r = np.random.uniform(0.846, 0.854, size=narrow_points)
+    theta = np.random.uniform(0, 2 * np.pi, size=narrow_points)
+    phi = np.random.uniform(0, np.pi, size=narrow_points)
+    x = r * np.sin(phi) * np.cos(theta)
+    y = r * np.sin(phi) * np.sin(theta)
+    z = r * np.cos(phi)
+    narrow_points = np.column_stack((x, y, z))
+    # save the narrow points with the signed distance
+    S_narrow = np.linalg.norm(narrow_points, axis=1) - radius
+    # normal at the particular point is the point itself
+    n_narrow = narrow_points
+    data_narrow = np.column_stack((narrow_points, S_narrow,n_narrow))
+    df_narrow = pd.DataFrame(data_narrow, columns=['x', 'y', 'z', 'S','nx','ny','nz'])
+
+    # generate random on surface points between -1 and 1 using r,theta,phi and convert to cartesian
+    # add 10% more onsurface points
+    # corresponding to the intersection of the sphere with the axes
+    # θ = 0, φ = 0: Corresponds to the positive z-axis.
+    # θ = π, φ = 0: Corresponds to the negative z-axis.
+    # θ = π/2, φ = 0: Corresponds to the positive y-axis.
+    # θ = 3π/2, φ = 0: Corresponds to the negative y-axis.
+    # θ = π/2, φ = π/2: Corresponds to the positive x-axis.
+    # θ = 3π/2, φ = π/2: Corresponds to the negative x-axis.
+
+
+    additional_points = int(0.1*on_surface_points)
+
+    r = 0.85 * np.ones(on_surface_points)
+    theta = np.random.uniform(0, 2 * np.pi, size=on_surface_points)
+    # generate theta corresponding to the intersection of the sphere with the axes
+    theta_axis = np.random.uniform(0, 2 * np.pi, size=on_surface_points)
+
+    phi = np.random.uniform(0, np.pi, size=on_surface_points)
+    x = r * np.sin(phi) * np.cos(theta)
+    y = r * np.sin(phi) * np.sin(theta)
+    z = r * np.cos(phi)
+    on_surface_points = np.column_stack((x, y, z))
+    # Generate additional points on the axes
+    axes_nearby_points = generate_points_near_axes(radius, additional_points)
+    on_surface_points = np.vstack((on_surface_points, axes_nearby_points))
+    # save the on surface points with the signed distance
+    S_on_surface = np.linalg.norm(on_surface_points, axis=1) - radius
+    # normal at the particular point is the point itself
+    n_on_surface = on_surface_points
+    data_on_surface = np.column_stack((on_surface_points, S_on_surface,n_on_surface))
+    df_on_surface = pd.DataFrame(data_on_surface, columns=['x', 'y', 'z', 'S','nx','ny','nz'])
+
+    dataframes = [("uniform", df_uniform), ("surface", df_on_surface), ("narrow", df_narrow)]
+
+    for name, df in dataframes:
+        path = os.path.join(save_path, f"{name}.csv")
+        df.to_csv(path,index=True)
+
+    return df_uniform,df_narrow,df_on_surface
+
+
 ##############################################################################################################
 ##################################### MAIN FUNCTIONS ##########################################################
 
