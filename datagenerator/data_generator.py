@@ -262,7 +262,7 @@ def compute_min_max(geometry_path):
 def generate_analytical_sphere(uniform_points,narrow_points,on_surface_points,save_path):
 
     # take a radius equal to our previous radius
-    radius = 0.85
+    radius = 0.5
 
     # generate random uniform points between -1 and 1 using r,theta,phi and convert to cartesian
     r = np.random.uniform(-1, 1, size=uniform_points)
@@ -307,7 +307,7 @@ def generate_analytical_sphere(uniform_points,narrow_points,on_surface_points,sa
 
     additional_points = int(0.1*on_surface_points)
 
-    r = 0.85 * np.ones(on_surface_points)
+    r = radius * np.ones(on_surface_points)
     theta = np.random.uniform(0, 2 * np.pi, size=on_surface_points)
     # generate theta corresponding to the intersection of the sphere with the axes
     theta_axis = np.random.uniform(0, 2 * np.pi, size=on_surface_points)
@@ -335,7 +335,75 @@ def generate_analytical_sphere(uniform_points,narrow_points,on_surface_points,sa
 
     return df_uniform,df_narrow,df_on_surface
 
+def generate_points_circle(uniform_points,on_surface_points,narrow_points,width,save_path):
+    """
+    Generate points on a circle with a given radius.
 
+    Args:
+        radius (float): The radius of the circle.
+        num_points (int): The number of points to generate.
+
+    Returns:
+        numpy.ndarray: An array of points on the circle.
+    """
+    # circle radius is set here 
+    radius = np.sqrt(2/np.pi)
+    # generate random uniform points between -1 and 1 using r,theta,phi and convert to cartesian
+    x = np.random.uniform(-1, 1, size=uniform_points)
+    y = np.random.uniform(-1, 1, size=uniform_points)
+    z = np.zeros(x.shape)
+
+    uniform_points = np.column_stack((x, y,z))
+    # save the uniform points with the signed distance 
+    S_uniform = np.linalg.norm(uniform_points, axis=1) - radius
+    # normal at the particular point is the point itself
+    norms=np.linalg.norm(uniform_points, axis=1)
+    n_uniform = uniform_points/ norms[:, np.newaxis]
+    data_uniform = np.column_stack((uniform_points, S_uniform,n_uniform))
+    df_uniform = pd.DataFrame(data_uniform, columns=['x', 'y','z','S','nx','ny','nz'])
+    
+    # generate random narrow points between -1 and 1 using r,theta,phi and convert to cartesian]
+    
+    r = np.random.uniform(radius+width, radius-width, size=narrow_points)
+    theta = np.random.uniform(0, 2 * np.pi, size=narrow_points)
+    x = r * np.cos(theta)
+    y = r * np.sin(theta)
+    z = np.zeros(x.shape)
+    narrow_points = np.column_stack((x, y,z))
+    # save the narrow points with the signed distance
+    S_narrow = np.linalg.norm(narrow_points, axis=1) - radius
+    
+    # normal at the particular point is the point itself
+    norms = np.linalg.norm(narrow_points, axis=1)
+    n_narrow = narrow_points/ norms[:, np.newaxis]
+
+    data_narrow = np.column_stack((narrow_points, S_narrow,n_narrow))
+    df_narrow = pd.DataFrame(data_narrow, columns=['x', 'y','z', 'S','nx','ny','nz'])
+
+    ###################GENERATE POINTS ON SURFACE
+
+    r = radius * np.ones(on_surface_points)
+    theta = np.random.uniform(0, 2 * np.pi, size=on_surface_points)
+
+    x = r *  np.cos(theta)
+    y = r * np.sin(theta)
+    z = np.zeros(x.shape)
+    on_surface_points = np.column_stack((x, y,z))
+    # save the on surface points with the signed distance
+    S_on_surface = np.linalg.norm(on_surface_points, axis=1) - radius
+    # normal at the particular point is the point itself
+    norm = np.linalg.norm(on_surface_points, axis=1)
+    n_on_surface = on_surface_points/ norm[:, np.newaxis]
+    data_on_surface = np.column_stack((on_surface_points, S_on_surface,n_on_surface))
+    df_on_surface = pd.DataFrame(data_on_surface, columns=['x', 'y','z', 'S','nx','ny','nz'])
+
+    dataframes = [("uniform", df_uniform), ("surface", df_on_surface), ("narrow", df_narrow)]
+
+    for name, df in dataframes:
+        path = os.path.join(save_path, f"{name}.csv")
+        df.to_csv(path,index=True)
+
+    return df_uniform,df_narrow,df_on_surface
 ##############################################################################################################
 ##################################### MAIN FUNCTIONS ##########################################################
 

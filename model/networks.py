@@ -100,15 +100,6 @@ class ImplicitNet(nn.Module):
             lin = getattr(self, "lin" + str(layer))
 
             if layer in self.skip_in:
-                # print(x)
-                # print("\n")
-                # y= x.clone()
-                # print(y)
-                # np.save(f"/work/mech-ai-scratch/samundra/experiments/sdf_representation_test/visualizing.npy", y.detach().cpu().numpy())
-                # print("skipin_val",self.skipin_val.shape)
-                # print("input",input.shape)
-                # val = self.skipin_val.repeat(input.size(0), 1)
-                # x = torch.cat([val, input], -1) / np.sqrt(2)
                 x = torch.cat([x, input], -1) / np.sqrt(2)
 
             if self.lipsitch:

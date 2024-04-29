@@ -12,6 +12,7 @@ import pickle
 from evaluations import post_process
 from collections import OrderedDict
 from skimage.measure import marching_cubes
+from skimage import measure
 from evaluations.generate_gif import plot_stl
 import torch.nn as nn
 from model.networks import FeedForwardNetwork,ImplicitNet
@@ -82,20 +83,23 @@ class Executor:
         return self.rescaled_path
     def sampling(self):
         # if not self.config.continue_sampling:
+        geometry_path = self.config.geometry if not self.config.rescale else self.rescale()
         if os.path.exists(os.path.join(self.data_path,"uniform.csv")) or os.path.exists(os.path.join(self.data_path,"surface.csv")) or os.path.exists(os.path.join(self.data_path,"narrow")):
             print("Sampling already done")
             return
-        # elif self.config.distributed:
-        #     data_generator.write_signed_distance_distributed(self.config.geometry,self.data_path,self.config.uniform_points,self.config.surface,self.config.narrowband,self.config.narrowband_width)
-        #     print("Distributed sampling done")
-
-        geometry_path = self.config.geometry if not self.config.rescale else self.rescale()
-        df_uniform_points,df_on_surface,df_narrow_band = data_generator.generate_signed_distance_data(geometry_path,self.config.uniform_points,self.config.surface,self.config.narrowband,self.config.narrowband_width)
-        # save the dataframes to CSV
-        df_uniform_points.to_csv(os.path.join(self.data_path,"uniform.csv"))
-        df_on_surface.to_csv(os.path.join(self.data_path,"surface.csv"))
-        df_narrow_band.to_csv(os.path.join(self.data_path,"narrow.csv"))
-        print("Sampling done")
+        if self.config.two_dim:
+           print("Circle Generation Is Running")
+           df_uniform,df_narrow,df_on_surface = data_generator.generate_points_circle(self.config.uniform_points,self.config.surface,self.config.narrowband,self.config.narrowband_width,self.data_path)
+           print("Sampling done")
+           return
+        else:
+            df_uniform_points,df_on_surface,df_narrow_band = data_generator.generate_signed_distance_data(geometry_path,self.config.uniform_points,self.config.surface,self.config.narrowband,self.config.narrowband_width)
+            # save the dataframes to CSV
+            df_uniform_points.to_csv(os.path.join(self.data_path,"uniform.csv"))
+            df_on_surface.to_csv(os.path.join(self.data_path,"surface.csv"))
+            df_narrow_band.to_csv(os.path.join(self.data_path,"narrow.csv"))
+            print("Sampling done")
+            return
     def train(self):
         # making sure that the sample exists 
         #  add a check here to see if the sampling is done
@@ -316,6 +320,10 @@ class Executor:
             model.load_state_dict(new_state_dict)
             return model
     def reconstruct_only(self):
+        if self.config.two_dim:
+            self.two_dim_contour()
+            return
+
         volume_size = (self.config.cubesize, self.config.cubesize, self.config.cubesize)  # Adjust this based on your requirements
         spacing = (2/volume_size[0], 2/volume_size[1], 2/volume_size[2])
         x = torch.linspace(-1, 1, volume_size[0], device=self.device)
@@ -327,36 +335,6 @@ class Executor:
         ###########################################################################################
         volume_size = (self.config.cubesize, self.config.cubesize, self.config.cubesize)  # Adjust this based on your requirements
 
-        # Adjust the spacing based on the provided minimum and maximum values
-        # spacing = (
-        #     (1.818538e+03 - (-3.437500e+02)) / volume_size[0],
-        #     (2.970000e+02 - (-9.598353e+02)) / volume_size[1],
-        #     (9.867585e+02 - (-4.425856e+03)) / volume_size[2]
-        # )
-
-        # # Generate coordinates using torch.linspace and meshgrid
-        # x = torch.linspace(-3.437500e+02, 1.818538e+03, volume_size[0])
-        # y = torch.linspace(-9.598353e+02, 2.970000e+02, volume_size[1])
-        # z = torch.linspace(-4.425856e+03, 9.867585e+02, volume_size[2])
-        # Set new limits
-        # new_limits = (-1, 1)
-
-        # spacing = (
-        #     (new_limits[1] - new_limits[0]) / volume_size[0],
-        #     (new_limits[1] - new_limits[0]) / volume_size[1],
-        #     (new_limits[1] - new_limits[0]) / volume_size[2]
-        # )
-
-        # # Generate coordinates using torch.linspace and meshgrid
-        # x = torch.linspace(new_limits[0], new_limits[1], volume_size[0])
-        # y = torch.linspace(new_limits[0], new_limits[1], volume_size[1])
-        # z = torch.linspace(new_limits[0], new_limits[1], volume_size[2])
-
-
-        # xx, yy, zz = torch.meshgrid(x, y, z, indexing='ij')
-
-        # # Reshape the coordinates to create a DataFrame
-        # coordinates = torch.stack((xx, yy, zz), dim=-1).reshape(-1, 3).to(self.device)
         ###########################################################################################
         batch_size = self.config.ppbatchsize  # Adjust based on available memory
         sdf_values = []
@@ -396,6 +374,64 @@ class Executor:
         print(f"Saving mesh to {path_to_save}")
         mesh.export(path_to_save, file_type='stl') 
         plot_stl(path_to_save,os.path.join(self.postprocess_save_path, f"{self.geometry_name}_resconstructed_{epoch}_cube_{self.config.cubesize}.gif"))
+    
+    def two_dim_contour(self):
+        volume_size = (self.config.cubesize, self.config.cubesize, self.config.cubesize)  # Adjust this based on your requirements
+        spacing = (2/volume_size[0], 2/volume_size[1], 2/volume_size[2])
+        x = torch.linspace(-1, 1, volume_size[0], device=self.device)
+        y = torch.linspace(-1, 1, volume_size[1], device=self.device)
+        xx, yy = torch.meshgrid(x, y)
+        zz = torch.zeros_like(xx)
+        coordinates = torch.stack((xx, yy, zz), dim=-1).reshape(-1, 3)
+        sdf_values = []
+        batch_size = self.config.ppbatchsize
+        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.lr)
+        print("Loading the best model\n\n")
+        print(f"Loading model from {self.model_save_path}")
+        print("\n\n")
+        # self.model,_, epoch, _, _, _ = Executor.load_model(self.model,optimizer,self.model_save_path,True)
+        self.model,epoch= Executor.load_model(self.model,optimizer,self.model_save_path,False)
+        print(f"Model loaded from epoch {epoch}")
+        with torch.no_grad():
+            for i in range(0, coordinates.shape[0], batch_size):
+                print(f"\nProcessing batch {i//batch_size}")
+                batch_coordinates = coordinates[i:i + batch_size]
+                batch_sdf = self.model(batch_coordinates.to(self.device)).to(torch.float32)
+                sdf_values.append(batch_sdf)
+                del batch_coordinates
+
+        sdf_values = torch.cat(sdf_values)
+        sdf_values = sdf_values.cpu().numpy().reshape(volume_size[0], volume_size[1])
+
+        contours = measure.find_contours(sdf_values, level=0.0)
+
+        # Plot the contours
+        for contour in contours:
+            plt.plot(contour[:, 1], contour[:, 0], 'k')
+
+        # Set the domain size
+        # domain_size = (-1, 1)  # adjust this based on your requirements
+        # plt.xlim(domain_size)
+        # plt.ylim(domain_size)
+
+        # Show the plot
+        path_to_save = os.path.join(self.postprocess_save_path, f"{self.geometry_name}_contours_{epoch}_cube_{self.config.cubesize}.png")
+        plt.savefig(path_to_save)
+
+        
+
+        # # Plot the circle
+        # circle_radius = np.sqrt(2 / np.pi)
+        # circle = plt.Circle((0, 0), circle_radius, color='r', fill=False)
+        # plt.gca().add_patch(circle)
+        # # Set equal aspect ratio
+        # plt.gca().set_aspect('equal', adjustable='box')
+        # Save the plot
+        # path_to_save = os.path.join(self.postprocess_save_path, f"{self.geometry_name}_contours_{epoch}_cube_{self.config.cubesize}.png")
+        # plt.savefig(path_to_save)
+
+
+
     def run(self):
         print("Running the executor")
         if self.config.samplingonly:

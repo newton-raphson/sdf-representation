@@ -2,6 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib.animation import FuncAnimation
+from matplotlib.colors import ListedColormap
 import os
 
 def plot_errors(file_path):
@@ -36,10 +37,13 @@ def plot_errors(file_path):
     ax = fig.add_subplot(111, projection='3d')
     scatter = ax.scatter(x, y, z, c=similarity, cmap='viridis')
 
+    # Add shading
+    scatter.set_edgecolor('face')
+    ax.set_axis_off()
     # Add color bar
-    cbar = plt.colorbar(scatter)
-    cbar.set_label('Similarity Values')
-    plt.title('Similarity HeatMap')
+    # cbar = plt.colorbar(scatter)
+    # cbar.set_label('Similarity Values')
+    # plt.title('Similarity HeatMap')
 
     plt.savefig(os.path.join(file_path, 'similarity_heatmap.png'))
     plt.close()
@@ -49,44 +53,66 @@ def plot_errors(file_path):
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
     
-
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    
+    # Custom colormap with only red and blue colors
+    cmap_custom = ListedColormap(['blue', 'red'])
     # Set color based on conditions
-    scatter = ax.scatter(x, y, z, c=['red' if e > 1/256 else 'blue' for e in error], alpha=0.7)
+    scatter = ax.scatter(x, y, z, c=['red' if e > 1/256 else 'blue' for e in error], cmap=cmap_custom,alpha=0.7)
+
+    # # Add shading
+    # scatter.set_edgecolor('face')
 
     # # Set axis labels
     # ax.set_xlabel('X')
     # ax.set_ylabel('Y')
     # ax.set_zlabel('Z')
+    # Hide axes
+    ax.set_axis_off()
 
     # Add color bar
     cbar = plt.colorbar(scatter)
     cbar.set_label('Error Values')
-
-    # Function to update the plot for animation
-    def update(frame):
-        ax.view_init(elev=10, azim=frame)
-
-    # Create the animation
-    rotation_animation = FuncAnimation(fig, update, frames=range(0, 360, 10), interval=5)
-
-    # Save the animation as a GIF
-    rotation_animation.save(os.path.join(file_path,"error_animation.gif"), writer='imagemagick', fps=15)
-
+    plt.savefig(os.path.join(file_path, 'threshold_error.png'))
     plt.close()
 
+    # Add shading
+    scatter.set_edgecolor('face')
 
-    # create animation for similarity heatmap without custom conditions
+    ax.set_axis_off()
 
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection='3d')
-    scatter = ax.scatter(x, y, z, c=similarity, cmap='viridis')
-    cbar = plt.colorbar(scatter)
-    cbar.set_label('Similarity Values')
-    def update(frame):
-        ax.view_init(elev=10, azim=frame)
-    rotation_animation = FuncAnimation(fig, update, frames=range(0, 360, 10), interval=5)
-    rotation_animation.save(os.path.join(file_path, "similarity_animation.gif"), writer='imagemagick', fps=15)
+    # Add color bar
+    # cbar = plt.colorbar(scatter)
+    # cbar.set_label('Error Values')
+    plt.savefig(os.path.join(file_path, 'threshold_error.png'))
     plt.close()
+
+    # # Function to update the plot for animation
+    # def update(frame):
+    #     ax.view_init(elev=10, azim=frame)
+
+    # # Create the animation
+    # rotation_animation = FuncAnimation(fig, update, frames=range(0, 360, 10), interval=5)
+
+    # # Save the animation as a GIF
+    # rotation_animation.save(os.path.join(file_path,"error_animation.gif"), writer='imagemagick', fps=15)
+
+    # plt.close()
+
+
+    # # create animation for similarity heatmap without custom conditions
+
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111, projection='3d')
+    # scatter = ax.scatter(x, y, z, c=similarity, cmap='viridis')
+    # cbar = plt.colorbar(scatter)
+    # cbar.set_label('Similarity Values')
+    # def update(frame):
+    #     ax.view_init(elev=10, azim=frame)
+    # rotation_animation = FuncAnimation(fig, update, frames=range(0, 360, 10), interval=5)
+    # rotation_animation.save(os.path.join(file_path, "similarity_animation.gif"), writer='imagemagick', fps=15)
+    # plt.close()
 
 if __name__ == '__main__':
     import sys

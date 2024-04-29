@@ -97,11 +97,11 @@ class IGRLOSS(nn.Module):
     # delta is the threshold value which is used to clamp the predicted and target SDF values
     # tau is the regularizer weight, regularization is the normal similarity (less rigorous then the direct normal loss)
     # lambda_g is the weight for the eikonal loss
-    def __init__(self,delta=0.1, tau=0.1, lambda_g=1,regularizer_threshold=1):
+    def __init__(self,delta=0.1, tau=1, lambda_g=0.1,regularizer_threshold=1):
         super(IGRLOSS, self).__init__()
         self.delta = delta
-        self.tau = tau
-        self.lambda_g = lambda_g
+        self.tau = tau ###normal_lambda
+        self.lambda_g = lambda_g ###normal_lambda eikonal
         self.regularizer_threshold= regularizer_threshold
     def __name__(self):
         return "IGRLOSS"

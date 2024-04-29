@@ -102,12 +102,14 @@ def save_as_onxx(path_chk,hidden_dim,num_hidden_layers,save_path):
                     x,                         # model input (or a tuple for multiple inputs)
                     os.path.join(save_path,"model.onnx"),   # where to save the model (can be a file or file-like object)
                     export_params=True,        # store the trained parameter weights inside the model file
-                    opset_version=10,          # the ONNX version to export the model to
+                    opset_version=15,          # the ONNX version to export the model to
                     do_constant_folding=True,  # whether to execute constant folding for optimization
                     input_names = ['input'],   # the model's input names
                     output_names = ['output'], # the model's output names
                     dynamic_axes={'input' : {0 : 'batch_size'},    # variable length axes
                                     'output' : {0 : 'batch_size'}})
+
+                                    
 def quantize_save(input_path, output_path,):
     quantized_model = quantize_dynamic(input_path, output_path)
 

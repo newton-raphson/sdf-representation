@@ -45,8 +45,10 @@ def load_data(data_path, config, device):
         raise ValueError("Very Less Points")
     print(f"Total points in the dataset: {total_points}")
     print(f"Total points in the dataset: {len(df)}")
+
     feature_columns = df.columns[0:-4]
     target_column = df.columns[-4:]
+
     print("traint_test_split_value", config.train_test_split)
     print(df[feature_columns].shape)
     print(df[target_column].shape)

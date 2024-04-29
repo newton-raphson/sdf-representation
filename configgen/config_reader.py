@@ -52,6 +52,11 @@ class Configuration:
         self.checkpointing = self.config.getint("Training","checkpointing")
         self.contd = self.config.getboolean("Training","continue")
         self.patience = self.config.getint("Training","patience")
+        if self.config.has_option("Training", "two_dim"):
+            self.two_dim = self.config.getboolean("Training", "two_dim")
+        else:
+            self.two_dim = False  # or a default value
+        
     
         # SAMPLING PARAMS
         self.samplingonly = self.config.getboolean("Sampling","samplingonly")
@@ -70,6 +75,7 @@ class Configuration:
         self.reconstruct = self.config.getboolean("Optional","reconstruct") # if true only reconstruction is done
         self.cubesize = self.config.getint("Optional","cubesize")
         self.ppbatchsize = self.config.getint("Optional","postprocessbatchsize")
+
     def get_loss_function(self):
         loss_function_name = self.config.get('Loss', 'loss_function')
 
