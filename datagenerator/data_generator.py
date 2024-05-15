@@ -6,6 +6,8 @@ import os
 import argparse
 import glob
 from utils.constants import RANDOM_SEED_DATA_GENERATION
+import gmsh
+import math
 ##############################################################################################################
 #####################################UTILITY FUNCTIONS########################################################
 def transform_to_triangle_space(lhs_point, triangle_coords):
@@ -100,6 +102,134 @@ def calculate_normal(triangle):
     if mag ==0:
         return 
     return normal / np.linalg.norm(normal)
+class KDTree:
+    def __init__(self, polygon_points):
+        self.data = np.array([(polygon_points[i] + polygon_points[i + 1]) / 2 for i in range(len(polygon_points) - 1)])
+        self.data = np.append(self.data, [(polygon_points[-1] + polygon_points[0]) / 2], axis=0)
+    
+    def knnSearch(self, query_pt, num_results, ret_index, out_dist_sqr):
+        distances = np.sum((self.data - query_pt[:-1] * np.ones(self.data.shape)) ** 2, axis=1)
+        sorted_indices = np.argsort(distances)
+        ret_index[:num_results] = sorted_indices[:num_results]
+        out_dist_sqr[:num_results] = distances[ret_index[:num_results]]
+        return num_results
+
+def extract_polygon_from_gmsh(filename):
+    gmsh.initialize()
+    gmsh.open(filename)
+
+    polygon_points = []
+    node_tag = 1
+
+    while True:
+        try:
+            while True:
+                v = gmsh.model.mesh.getNode(node_tag)
+                polygon_points.append(np.array([v[0][0], v[0][1]]))
+                node_tag += 1
+        except Exception as e:
+            break
+
+    gmsh.finalize()
+
+    polygon_points.append(polygon_points[0])
+
+    return polygon_points
+
+def compute_distance_vector(pt, m_lines, kd_trees, d):
+    x = pt[0]
+    y = pt[1]
+    d = [0.0] * 3
+    num_results = 2
+    ret_index = np.zeros(num_results, dtype=np.uint32)
+    out_dist_sqr = np.zeros(num_results)
+
+    query_pt = np.array([x, y, 0.0])
+
+    num_results = kd_trees.knnSearch(query_pt, num_results, ret_index, out_dist_sqr)
+
+    OnePointVector = np.zeros(len(pt))
+    OnePointVectorOtherEnd = np.zeros(len(pt))
+    OnePointVector2 = np.zeros(len(pt))
+    OnePointVectorOtherEnd2 = np.zeros(len(pt))
+
+    for dim in range(len(pt)-1):
+        OnePointVector[dim] = m_lines[ret_index[0]][0][dim] - pt[dim]
+        OnePointVectorOtherEnd[dim] = m_lines[ret_index[0]][1][dim] - pt[dim]
+        OnePointVector2[dim] = m_lines[ret_index[1]][0][dim] - pt[dim]
+        OnePointVectorOtherEnd2[dim] = m_lines[ret_index[1]][1][dim] - pt[dim]
+
+    PickNormalVector = np.array([m_lines[ret_index[0]][2][0], m_lines[ret_index[0]][2][1], 0.0])
+    PickNormalVector2 = np.array([m_lines[ret_index[1]][2][0], m_lines[ret_index[1]][2][1], 0.0])
+
+    scale = 0.0
+    scale2 = 0.0
+    for dim in range(len(pt)-1):
+        scale += OnePointVector[dim] * PickNormalVector[dim]
+        scale2 += OnePointVector2[dim] * PickNormalVector2[dim]
+
+    DistanceVector = PickNormalVector * scale
+    DistanceVector2 = PickNormalVector2 * scale2
+
+    for dim in range(len(pt)-1):
+        d[dim] = DistanceVector2[dim] if np.linalg.norm(DistanceVector) > np.linalg.norm(DistanceVector2) else DistanceVector[dim]
+
+    PickClosestNumber = 1 if np.linalg.norm(DistanceVector) > np.linalg.norm(DistanceVector2) else 0
+
+    Distance2EndPoint = [np.linalg.norm(OnePointVector), np.linalg.norm(OnePointVectorOtherEnd), np.linalg.norm(OnePointVector2), np.linalg.norm(OnePointVectorOtherEnd2)]
+
+    if not isPointOnLineSegment(m_lines[ret_index[PickClosestNumber]][0], m_lines[ret_index[PickClosestNumber]][1], [pt[0] + d[0], pt[1] + d[1], 0.0]):
+        IndexOfSmallest = Distance2EndPoint.index(min(Distance2EndPoint))
+
+        if IndexOfSmallest == 0:
+            for dim in range(len(pt)-1):
+                d[dim] = OnePointVector[dim]
+        elif IndexOfSmallest == 1:
+            for dim in range(len(pt)-1):
+                d[dim] = OnePointVectorOtherEnd[dim]
+        elif IndexOfSmallest == 2:
+            for dim in range(len(pt)-1):
+                d[dim] = OnePointVector2[dim]
+        elif IndexOfSmallest == 3:
+            for dim in range(len(pt)-1):
+                d[dim] = OnePointVectorOtherEnd2[dim]
+       # Ray casting algorithm to determine if the point is inside or outside the polygon
+    # magnitude of the distance 
+
+    distnace_magnitude = np.linalg.norm(d)
+    d = d/distnace_magnitude
+    num_intersections = 0
+    for line in m_lines:
+        if ((line[0][1] <= pt[1] and line[1][1] > pt[1]) or (line[0][1] > pt[1] and line[1][1] <= pt[1])) and \
+                (pt[0] < (line[1][0] - line[0][0]) * (pt[1] - line[0][1]) / (line[1][1] - line[0][1]) + line[0][0]):
+            num_intersections += 1
+
+    if num_intersections % 2 == 1:
+        # Odd number of intersections means the point is inside the polygon
+        distnace_magnitude=-1*distnace_magnitude
+    else:
+        # Even number of intersections means the point is outside the polygon
+        distnace_magnitude = 1*distnace_magnitude
+
+    return distnace_magnitude,d
+
+def compute_distances_kdtree(query_pt,m_lines,kd_tree):
+    distances = []
+    normals = []
+
+    for pt in query_pt:
+        distnace_magnitude,d = compute_distance_vector(pt, m_lines, kd_tree, [])  # Compute distance vector
+        distances.append(distnace_magnitude)  # Extract only the distance components
+        normals.append(d)    # Extract the normal vector components
+
+    return np.array(distances), np.array(normals)
+
+
+def isPointOnLineSegment(p1, p2, p):
+    totalDist = math.sqrt((p2[0] - p1[0]) ** 2 + (p2[1] - p1[1]) ** 2)
+    dist1 = math.sqrt((p[0] - p1[0]) ** 2 + (p[1] - p1[1]) ** 2)
+    dist2 = math.sqrt((p2[0] - p[0]) ** 2 + (p2[1] - p[1]) ** 2)
+    return abs(dist1 + dist2 - totalDist) < 1e-9
 
 
 # Function to generate points near the axes intersection
@@ -407,7 +537,108 @@ def generate_points_circle(uniform_points,on_surface_points,narrow_points,width,
 ##############################################################################################################
 ##################################### MAIN FUNCTIONS ##########################################################
 
+def generate_signed_distance_2D_msh(uniform_points, narrow_points, on_surface_points, width, geometry_path, save_path):
+    """
+    Generate signed distance data for a given 2D mesh geometry.
 
+    Args:
+    - uniform_points (int): The number of uniformly distributed points to generate.
+    - narrow_points (int): The number of points to generate within the narrow band.
+    - on_surface_points (int): The number of points to generate on the surface.
+    - width (float): The width of the dense region around the surface.
+    - geometry_path (str): The path to the 2D mesh geometry file.
+    - save_path (str): The path to save the generated signed distance data.
+
+    Returns:
+    - bool: True if the signed distance data is successfully written to the CSV files, otherwise function fails
+    """
+    # Extract the polygon from the Gmsh file
+    polygon_points = extract_polygon_from_gmsh(geometry_path)
+
+    # Create a KDTree for the polygon points
+    kd_tree = KDTree(polygon_points)
+    # Generate the signed distance data for the uniform points
+    m_lines = [np.array([np.array(polygon_points[i]), np.array(polygon_points[i + 1]), np.zeros(2)]) for i in range(len(polygon_points) - 1)]
+    m_lines.append(np.array([np.array(polygon_points[0]), np.array(polygon_points[-1]), np.zeros(2)]))
+    number_of_lines = len(m_lines)
+
+        ###################GENERATE POINTS ON SURFACE
+    points_per_line = on_surface_points // number_of_lines
+    points = np.array([])  # Initialize an empty array to store points
+
+    for line in m_lines:
+        dt = line[1] - line[0]
+        samples = np.random.uniform(0, 1, points_per_line)  # Generate random samples for each line
+        point = line[0] + samples[:, np.newaxis] * dt
+      # Compute the points along the line
+        if points.size == 0:
+            points = point
+        else:
+            points = np.vstack((points, point))
+    print(f"Shapes of points is {points.shape}")
+    x = points[:, 0]
+    y = points[:, 1]
+    z = np.zeros(x.shape)
+    on_surface_points = np.column_stack((x, y,z))
+    S_on_surface = np.zeros(len(points))
+    norm = np.linalg.norm(on_surface_points, axis=1)
+    n_on_surface = on_surface_points/ norm[:, np.newaxis]
+    data_on_surface = np.column_stack((on_surface_points, S_on_surface,n_on_surface))
+    df_on_surface = pd.DataFrame(data_on_surface, columns=['x', 'y','z', 'S','nx','ny','nz'])
+        # circle radius is set here 
+    path = os.path.join(save_path, "surface.csv")
+    df_on_surface.to_csv(path,index=True)
+    exit(1)
+    # Uniform points
+    radius = np.sqrt(2/np.pi)
+    # generate random uniform points between -1 and 1 using r,theta,phi and convert to cartesian
+    x = np.random.uniform(-1, 1, size=uniform_points)
+    y = np.random.uniform(-1, 1, size=uniform_points)
+    z = np.zeros(x.shape)
+    uniform_points = np.column_stack((x, y,z))
+    S_uniform = np.linalg.norm(uniform_points, axis=1) - radius
+    # normal at the particular point is the point itself
+    norms=np.linalg.norm(uniform_points, axis=1)
+    n_uniform = uniform_points/ norms[:, np.newaxis]
+    data_uniform = np.column_stack((uniform_points, S_uniform,n_uniform))
+    df_uniform = pd.DataFrame(data_uniform, columns=['x', 'y','z','S','nx','ny','nz'])
+    
+    # generate random narrow points between -1 and 1 using r,theta,phi and convert to cartesian]
+    
+    points_per_line = narrow_points // number_of_lines
+    points = np.array([])  # Initialize an empty array to store points
+
+    for line in m_lines:
+        dt = line[1] - line[0]
+        samples = np.random.uniform(0, 1, points_per_line)  # Generate random samples for each line
+        point = line[0] + samples[:, np.newaxis] * dt
+        narrow_widths = np.random.uniform(-width,width,)
+      # Compute the points along the line
+        if points.size == 0:
+            points = point
+        else:
+            points = np.vstack((points, point))
+    print(f"Shapes of points is {points.shape}")
+    x = points[:, 0]
+    y = points[:, 1]
+    z = np.zeros(x.shape)
+    narrow_points = np.column_stack((x, y,z))
+    # save the narrow points with the signed distance
+    S_narrow,n_narrow = compute_distances_kdtree(narrow_points,m_lines,kd_tree)
+
+    data_narrow = np.column_stack((narrow_points, S_narrow,n_narrow))
+    df_narrow = pd.DataFrame(data_narrow, columns=['x', 'y','z', 'S','nx','ny','nz'])
+
+
+
+    dataframes = [("uniform", df_uniform), ("surface", df_on_surface), ("narrow", df_narrow)]
+
+    for name, df in dataframes:
+        path = os.path.join(save_path, f"{name}.csv")
+        df.to_csv(path,index=True)
+
+    return df_uniform,df_narrow,df_on_surface
+    
 # TO GENERAATE MISMATCH DATA AFTER POST PROCESSING
 def write_signed_distance_mismatch(query_points, geometry_path):
     mesh = trimesh.load(geometry_path)

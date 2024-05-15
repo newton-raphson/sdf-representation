@@ -76,20 +76,11 @@ class ImplicitNet(nn.Module):
             setattr(self, "lin" + str(layer), lin)
 
         if beta > 0:
-            self.activation = nn.Softplus(beta=beta)
-        # Tested during experiments but did not work
-        # so commented out
-        # if beta == 99:
-        #     self.activation = SinActivation()
-        # vanilla relu
+            self.activation = nn.Softplus(beta=beta,threshold=0)
+
         else:
             self.activation = nn.ReLU()
 
-        # just for testing let's get the skip_in value layer previously generated
-        # val = np.load("/work/mech-ai-scratch/samundra/experiments/sdf_representation_test/visualizing.npy")
-        # self.skipin_val = torch.tensor(val[0])
-        # self.skipin_val = self.skipin_val.view(1,self.skipin_val.size(0))
-        # print("skipin_val_shape",self.skipin_val.shape)
     def __name__(self):
         return "ImplicitNet"
     def forward(self, input):
@@ -102,8 +93,8 @@ class ImplicitNet(nn.Module):
             if layer in self.skip_in:
                 x = torch.cat([x, input], -1) / np.sqrt(2)
 
-            if self.lipsitch:
-                self.normalization(lin.parameters(),1/self.ci[layer]*nn.softplus(beta=self.ci[layer]))
+            # if self.lipsitch:
+            #     self.normalization(lin.parameters(),1/self.ci[layer]*nn.softplus(beta=self.ci[layer]))
             
             x = lin(x)
             if layer < self.num_layers - 2:
@@ -163,9 +154,6 @@ class ImplicitNetCompatible(nn.Module):
 
         if beta > 0:
             self.activation = nn.Softplus(beta=beta)
-        # if beta == 99:
-        #     self.activation = SinActivation()
-        # vanilla relu
         else:
             self.activation = nn.ReLU()
         

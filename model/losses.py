@@ -108,6 +108,7 @@ class IGRLOSS(nn.Module):
         # y, y_predicted,model,inputs,true_surface_normal,epoch,surface_normal
     def forward(self, x_batch,y_batch,model,epoch):
         # Apply the clamp operation to predicted and target SDF values
+        
         predicted_sdf = torch.clamp(model(x_batch), -self.delta, self.delta)
         target_sdf = torch.clamp(y_batch[:,0], -self.delta, self.delta)
 
@@ -117,8 +118,7 @@ class IGRLOSS(nn.Module):
 
         # calculate the surface normal
         surface_normal = compute_normal(model, x_batch)
-        gradient_norm = surface_normal.norm(2,dim=-1)
-
+        gradient_norm = surface_normal.norm(2,dim=-1) 
         true_surface_normal = y_batch[:,1:].view(-1, 3)
         surface_normal = surface_normal.view(-1, 3)
         # regularizer loss is the normal similarity

@@ -83,13 +83,16 @@ class Executor:
         return self.rescaled_path
     def sampling(self):
         # if not self.config.continue_sampling:
-        geometry_path = self.config.geometry if not self.config.rescale else self.rescale()
+        if not self.config.two_dim:
+            geometry_path = self.config.geometry if not self.config.rescale else self.rescale()
+        else:
+            geometry_path = self.config.geometry 
         if os.path.exists(os.path.join(self.data_path,"uniform.csv")) or os.path.exists(os.path.join(self.data_path,"surface.csv")) or os.path.exists(os.path.join(self.data_path,"narrow")):
             print("Sampling already done")
             return
         if self.config.two_dim:
            print("Circle Generation Is Running")
-           df_uniform,df_narrow,df_on_surface = data_generator.generate_points_circle(self.config.uniform_points,self.config.surface,self.config.narrowband,self.config.narrowband_width,self.data_path)
+           df_uniform,df_narrow,df_on_surface = data_generator.generate_signed_distance_2D_msh(self.config.uniform_points,self.config.narrowband,self.config.surface,self.config.narrowband_width,self.config.geometry,self.data_path)
            print("Sampling done")
            return
         else:
@@ -110,26 +113,20 @@ class Executor:
             print("Sampling failed")
             return
         # already in the class variables
-        training_dataloader, validation_dataloader = load_data.load_data(self.data_path,self.config,self.device)
-        # training_dataloader, val_X, val_Y = load_data.load_data(self.data_path,self.config,self.device)
-        # optimizer is used as provided in the config
-        # print(self.config.lr)        
-        self.model.to(self.device)
-
-        # val_X = val_X.to(self.device)
-        # val_Y = val_Y.to(self.device)
-
-        # model = self.model
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.config.lr)
+        training_dataloader, validation_dataloader = load_data.load_data(self.data_path,self.config,self.device)     
+        # model as follow
+        model = self.model
+        # optimizer as follow
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.config.lr)
         # ##################### ADDED FOR TESTING ############################
-        scheduler = StepLR(optimizer, step_size=50, gamma=0.1)
+        # scheduler = StepLR(optimizer, step_size=100, gamma=0.1)
         # ####################################################################
         if self.device == 'cuda':
             torch.cuda.empty_cache()
         if self.config.contd:
             # load the best model from the model_save_path
-            self.model, optimizer, start_epoch, loss_per_epoch, best_val_loss,val_loss_per_epoch =\
-                Executor.load_model(self.model,optimizer,self.model_save_path,best=True)  
+            model, optimizer, start_epoch, loss_per_epoch, best_val_loss,val_loss_per_epoch =\
+                Executor.load_model(model,optimizer,self.model_save_path,best=True)  
         else:
             start_epoch = 0
             loss_per_epoch = []
@@ -137,68 +134,63 @@ class Executor:
             best_val_loss = float('inf')
         # counter for early stopping
         # train the model
-        self.model.train()
+        model = model.to(self.device)
+        model = model.train()
+
         counter = 0
+
         for i in range(start_epoch, int(self.config.epochs)):
             loss=0
             train_loss = 0
             val_loss = 0
             torch.cuda.empty_cache()
+            
             for batch, (x_batch, y_batch) in enumerate(training_dataloader):
-                loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), self.model,i)
+                loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
-                # predicted_sdf = self.model(x_batch)
-                # target_sdf = y_batch[:,0].unsqueeze(1)
-                # loss = self.loss(predicted_sdf,target_sdf)
-                # optimizer.zero_grad()
-                # loss.backward()
-                # optimizer.step()
-                # train_loss += loss.item()
                 del x_batch
                 del y_batch
+
             # take a step in the scheduler
             scheduler.step()
             torch.cuda.empty_cache()
             train_loss = train_loss/len(training_dataloader)
             loss_per_epoch.append(train_loss)
-            val_loss = 0
-            self.model.eval()
+            model.eval()
             for batch, (x_batch, y_batch) in enumerate(validation_dataloader):
-                loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), self.model,i)
+                loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i)
                 val_loss += loss.item()
             val_loss = val_loss/len(validation_dataloader)
-            # val_loss = self.loss(self.model(val_X),val_Y[:,0].unsqueeze(1))
-            # print("val_X device:", val_X.device)
-            # print("val_Y device:", val_Y.device)
-            # print("self.model device:", next(self.model.parameters()).device)
-            # val_loss = self.loss(val_X,val_Y,self.model,i)
             val_loss_per_epoch.append(val_loss)
-            self.model.train()
+            model.train()
+
+            val_loss_per_epoch.append(val_loss)
             # write this to a file 
             str_to_write = f"Epoch {i+1}/{self.config.epochs}: train loss {train_loss} validation loss {val_loss}\n"
-            print(str_to_write)
             with open(os.path.join(self.train_path,"train_loss.txt"),"a") as f:
                 f.write(str_to_write)
-
+            if i%self.config.checkpointing==0:
+                print(str_to_write)
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 counter = 0
                 # save the model
                 # code to save the model 
-                Executor.save_model(self.model, optimizer, loss_per_epoch, i,best_val_loss,val_loss_per_epoch,self.model_save_path,best=True)
+                Executor.save_model(model, optimizer, loss_per_epoch, i,best_val_loss,val_loss_per_epoch,self.model_save_path,best=True)
             else:
                 # increase the counter by 1
                 counter += 1
             if counter >= self.config.patience and i >= self.config.minepochs:
                 print("Early stopping: No improvement for the last {} epochs".format(self.config.patience))
-                Executor.save_model(self.model, optimizer, loss_per_epoch, i,best_val_loss,val_loss_per_epoch,self.model_save_path,best=False)
+                Executor.save_model(model, optimizer, loss_per_epoch, i,best_val_loss,val_loss_per_epoch,self.model_save_path,best=False)
                 break
             if i%self.config.checkpointing == 0:
+                
                 # save the model every 
-                Executor.save_model(self.model, optimizer, loss_per_epoch, i,best_val_loss,val_loss_per_epoch,self.model_save_path,best=False)
+                Executor.save_model(model, optimizer, loss_per_epoch, i,best_val_loss,val_loss_per_epoch,self.model_save_path,best=False)
                 fig, ax = plt.subplots()
                 ax.plot(loss_per_epoch, label='train_loss')
                 ax.plot(val_loss_per_epoch, label='val_loss')
@@ -320,9 +312,9 @@ class Executor:
             model.load_state_dict(new_state_dict)
             return model
     def reconstruct_only(self):
-        if self.config.two_dim:
-            self.two_dim_contour()
-            return
+        # if self.config.two_dim:
+        #     self.two_dim_contour()
+        #     return
 
         volume_size = (self.config.cubesize, self.config.cubesize, self.config.cubesize)  # Adjust this based on your requirements
         spacing = (2/volume_size[0], 2/volume_size[1], 2/volume_size[2])
@@ -403,11 +395,36 @@ class Executor:
         sdf_values = torch.cat(sdf_values)
         sdf_values = sdf_values.cpu().numpy().reshape(volume_size[0], volume_size[1])
 
-        contours = measure.find_contours(sdf_values, level=0.0)
+        # contours = measure.find_contours(sdf_values, level=0.0)
 
-        # Plot the contours
-        for contour in contours:
-            plt.plot(contour[:, 1], contour[:, 0], 'k')
+        # # Plot the contours
+        # for contour in contours:
+        #     plt.plot(contour[:, 1], contour[:, 0], 'k')
+        # Define the threshold
+        threshold = 1 / (2 ** 10)
+
+        # Compute the radius of the contour
+        contour_points = []
+        for i in range(len(xx)):
+            for j in range(len(yy)):
+                if abs(sdf_values[i, j]) < threshold:
+                    contour_points.append((xx[i, j].cpu().numpy(), yy[i, j].cpu().numpy()))
+        # Calculate the distance of each point on the contour from the origin (0,0)
+        distances_from_origin = [np.sqrt(x**2 + y**2) for x, y in contour_points]
+        np_distances = np.array(distances_from_origin)
+        # save the distances to a file as csv
+        np.savetxt(os.path.join(self.postprocess_save_path, f"{self.geometry_name}_distances_{epoch}_cube_{self.config.cubesize}.csv"), np_distances, delimiter=",")
+
+        plt.figure()
+        plt.contourf(xx.cpu().numpy(), yy.cpu().numpy(), sdf_values, levels=0, cmap='coolwarm')
+        plt.colorbar()
+        circle_radius = np.sqrt(2 / np.pi)
+        circle = plt.Circle((0, 0), circle_radius, color='r', fill=False)
+        plt.gca().add_patch(circle)
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.grid(True)
+        path_to_save = os.path.join(self.postprocess_save_path, f"{self.geometry_name}_contours_{epoch}_cube_{self.config.cubesize}.png")
 
         # Set the domain size
         # domain_size = (-1, 1)  # adjust this based on your requirements
@@ -429,9 +446,6 @@ class Executor:
         # Save the plot
         # path_to_save = os.path.join(self.postprocess_save_path, f"{self.geometry_name}_contours_{epoch}_cube_{self.config.cubesize}.png")
         # plt.savefig(path_to_save)
-
-
-
     def run(self):
         print("Running the executor")
         if self.config.samplingonly:
