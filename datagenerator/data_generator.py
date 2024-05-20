@@ -533,7 +533,7 @@ def generate_points_circle(uniform_points,on_surface_points,narrow_points,width,
         path = os.path.join(save_path, f"{name}.csv")
         df.to_csv(path,index=True)
 
-    return df_uniform,df_narrow,df_on_surface
+    # return df_uniform,df_narrow,df_on_surface
 ##############################################################################################################
 ##################################### MAIN FUNCTIONS ##########################################################
 

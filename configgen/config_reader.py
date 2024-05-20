@@ -3,6 +3,7 @@
 
 import configparser
 from model import networks,losses
+import torch.nn as nn
 
 class Configuration:
     def __init__(self, file_path='config.ini'):
@@ -40,6 +41,17 @@ class Configuration:
             self.skip_connection = ()
             self.beta = 0
             self.geometric_init= False
+        if self.config.get("Model","model") == "KAN":
+            self.hidden_dim = self.config.getint("Model","hidden_dim")
+            self.num_hidden_layers = self.config.getint("Model","num_hidden_layers")
+            kan_param = [self.hidden_dim for i in range(self.num_hidden_layers)]
+            kan_param=[3]+kan_param+[1]
+            self.model = model(kan_param)
+            self.skip_connection = ()
+            self.beta = 0
+            self.geometric_init= False
+
+
         print(self.model)
         # LOSS PARAMS
         self.loss = self.get_loss_function()

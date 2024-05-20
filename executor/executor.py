@@ -92,7 +92,8 @@ class Executor:
             return
         if self.config.two_dim:
            print("Circle Generation Is Running")
-           df_uniform,df_narrow,df_on_surface = data_generator.generate_signed_distance_2D_msh(self.config.uniform_points,self.config.narrowband,self.config.surface,self.config.narrowband_width,self.config.geometry,self.data_path)
+        #    df_uniform,df_narrow,df_on_surface = data_generator.generate_signed_distance_2D_msh(self.config.uniform_points,self.config.narrowband,self.config.surface,self.config.narrowband_width,self.config.geometry,self.data_path)
+           data_generator.generate_points_circle(self.config.uniform_points,self.config.surface,self.config.narrowband,self.config.narrowband_width,self.data_path)
            print("Sampling done")
            return
         else:
@@ -119,7 +120,7 @@ class Executor:
         # optimizer as follow
         optimizer = torch.optim.Adam(model.parameters(), lr=self.config.lr)
         # ##################### ADDED FOR TESTING ############################
-        # scheduler = StepLR(optimizer, step_size=100, gamma=0.1)
+        scheduler = StepLR(optimizer, step_size=100, gamma=0.1)
         # ####################################################################
         if self.device == 'cuda':
             torch.cuda.empty_cache()
@@ -147,6 +148,8 @@ class Executor:
             
             for batch, (x_batch, y_batch) in enumerate(training_dataloader):
                 loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i)
+                # if model.__name__=="KAN":
+                #     loss+=model.regularization_loss(1,0)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -162,12 +165,13 @@ class Executor:
             model.eval()
             for batch, (x_batch, y_batch) in enumerate(validation_dataloader):
                 loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i)
+                # if model.__name__=="KAN":
+                #     loss+=model.regularization_loss(1,0)
                 val_loss += loss.item()
             val_loss = val_loss/len(validation_dataloader)
             val_loss_per_epoch.append(val_loss)
             model.train()
 
-            val_loss_per_epoch.append(val_loss)
             # write this to a file 
             str_to_write = f"Epoch {i+1}/{self.config.epochs}: train loss {train_loss} validation loss {val_loss}\n"
             with open(os.path.join(self.train_path,"train_loss.txt"),"a") as f:
@@ -312,9 +316,9 @@ class Executor:
             model.load_state_dict(new_state_dict)
             return model
     def reconstruct_only(self):
-        # if self.config.two_dim:
-        #     self.two_dim_contour()
-        #     return
+        if self.config.two_dim:
+            self.two_dim_contour()
+            return
 
         volume_size = (self.config.cubesize, self.config.cubesize, self.config.cubesize)  # Adjust this based on your requirements
         spacing = (2/volume_size[0], 2/volume_size[1], 2/volume_size[2])
@@ -382,13 +386,13 @@ class Executor:
         print(f"Loading model from {self.model_save_path}")
         print("\n\n")
         # self.model,_, epoch, _, _, _ = Executor.load_model(self.model,optimizer,self.model_save_path,True)
-        self.model,epoch= Executor.load_model(self.model,optimizer,self.model_save_path,False)
+        model,epoch= Executor.load_model(self.model,optimizer,self.model_save_path,False)
         print(f"Model loaded from epoch {epoch}")
         with torch.no_grad():
             for i in range(0, coordinates.shape[0], batch_size):
                 print(f"\nProcessing batch {i//batch_size}")
                 batch_coordinates = coordinates[i:i + batch_size]
-                batch_sdf = self.model(batch_coordinates.to(self.device)).to(torch.float32)
+                batch_sdf = model(batch_coordinates.to(self.device)).to(torch.float32)
                 sdf_values.append(batch_sdf)
                 del batch_coordinates
 
