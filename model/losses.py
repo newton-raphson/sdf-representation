@@ -154,7 +154,59 @@ class RegularizedCustomSDFLoss(nn.Module):
         regularizer_loss = torch.where(target_sdf.abs() < self.regularizer_threshold, (true_surface_normal-surface_normal)**2 , torch.zeros_like(loss))
         total_loss = loss.mean() +  self.regularizer_weight*regularizer_loss.mean()
         return total_loss
+class GaussBonnetLoss(nn.Module):
+    def __init__(self, delta=0.1, tau=1, lambda_g=0.1, regularizer_threshold=1, gauss_bonnet_weight=0.1):
+        super(GaussBonnetLoss, self).__init__()
+        self.delta = delta
+        self.tau = tau
+        self.lambda_g = lambda_g
+        self.regularizer_threshold = regularizer_threshold
+        self.gauss_bonnet_weight = gauss_bonnet_weight
 
+    def __name__(self):
+        return "GaussBonnetLoss"
+
+    def forward(self, x_batch, y_batch, model, epoch, euler_characteristic):
+        predicted_sdf = torch.clamp(model(x_batch), -self.delta, self.delta)
+        target_sdf = torch.clamp(y_batch[:, 0], -self.delta, self.delta)
+
+        loss = (predicted_sdf - target_sdf) ** 2
+        regularizer_loss = torch.zeros_like(loss)
+
+        surface_normal = compute_normal(model, x_batch)
+        gradient_norm = surface_normal.norm(2, dim=-1)
+        true_surface_normal = y_batch[:, 1:].view(-1, 3)
+        surface_normal = surface_normal.view(-1, 3)
+
+        regularizer_loss = torch.where(
+            target_sdf.abs() < self.regularizer_threshold,
+            (1 - torch.nn.functional.cosine_similarity(true_surface_normal, surface_normal / surface_normal.norm(), dim=-1)) ** 2,
+            1e-8 * torch.ones_like(loss)
+        )
+
+        gradient_loss = torch.where(
+            target_sdf.abs() < self.regularizer_threshold,
+            (gradient_norm - 1) ** 2,
+            1e-8 * torch.ones_like(loss)
+        )
+
+        gauss_bonnet_loss = self.compute_gauss_bonnet_loss(x_batch, model, euler_characteristic)
+
+        total_loss = loss.mean() + self.tau * regularizer_loss.mean() + self.lambda_g * gradient_loss.mean() + self.gauss_bonnet_weight * gauss_bonnet_loss.mean()
+        return total_loss
+
+    def compute_gauss_bonnet_loss(self, x_batch, model, euler_characteristic):
+        gaussian_curvature = compute_gaussian_curvature(model, x_batch)
+        geodesic_curvature = compute_geodesic_curvature(model, x_batch)
+
+        sdf = model(x_batch)
+        surface_mask = torch.abs(sdf) < self.regularizer_threshold
+
+        gauss_bonnet_integral = torch.where(surface_mask, gaussian_curvature, torch.zeros_like(gaussian_curvature)).sum()
+        boundary_integral = torch.where(surface_mask, geodesic_curvature, torch.zeros_like(geodesic_curvature)).sum()
+        
+        gauss_bonnet_term = gauss_bonnet_integral + boundary_integral - 2 * torch.pi * euler_characteristic
+        return gauss_bonnet_term ** 2
 def compute_normal(model, pj):
     # Make predictions using the model
     pj.requires_grad = True
@@ -170,5 +222,69 @@ def compute_normal(model, pj):
         only_inputs=True)[0][:, -3:]
     return points_grad
 
-
-
+def compute_hessian(model, points):
+    points.requires_grad = True
+    sdf_values = model(points)
+    gradients = torch.autograd.grad(
+        outputs=sdf_values,
+        inputs=points,
+        grad_outputs=torch.ones_like(sdf_values),
+        create_graph=True,
+        retain_graph=True,
+        only_inputs=True
+    )[0]
+    hessian = []
+    for i in range(gradients.shape[1]):
+        grad_grad = torch.autograd.grad(
+            outputs=gradients[:, i],
+            inputs=points,
+            grad_outputs=torch.ones_like(gradients[:, i]),
+            create_graph=True,
+            retain_graph=True,
+            only_inputs=True
+        )[0]
+        hessian.append(grad_grad)
+    hessian = torch.stack(hessian, dim=-1)
+    return hessian
+def compute_gradient(model, points):
+    points.requires_grad = True
+    sdf_values = model(points)
+    gradients = torch.autograd.grad(
+        outputs=sdf_values,
+        inputs=points,
+        grad_outputs=torch.ones_like(sdf_values),
+        create_graph=True,
+        retain_graph=True,
+        only_inputs=True
+    )[0]
+    return gradients
+def compute_gaussian_curvature(model, points):
+    gradient = compute_gradient(model, points)
+    hessian = compute_hessian(model, points)
+    gradient_norm = torch.norm(gradient, dim=1, keepdim=True)
+    hessian_determinant = torch.det(hessian)
+    gaussian_curvature = hessian_determinant / (1 + gradient_norm**2)**2
+    return gaussian_curvature
+def compute_tangent(normal):
+    if torch.allclose(normal[:, -1], torch.zeros_like(normal[:, -1])):
+        fixed_vector = torch.tensor([0, 1, 0], device=normal.device, dtype=normal.dtype)
+    else:
+        fixed_vector = torch.tensor([0, 0, 1], device=normal.device, dtype=normal.dtype)
+    tangent = torch.cross(normal, fixed_vector.unsqueeze(0).repeat(normal.size(0), 1))
+    tangent = tangent / tangent.norm(dim=1, keepdim=True)
+    return tangent
+def compute_geodesic_curvature(model, points):
+    normal = compute_gradient(model, points)
+    normal = normal / normal.norm(dim=1, keepdim=True)
+    tangent = compute_tangent(normal)
+    # tangent.requires_grad = True
+    tangent_derivative = torch.autograd.grad(
+        outputs=tangent,
+        inputs=points,
+        grad_outputs=torch.ones_like(tangent),
+        create_graph=True,
+        retain_graph=True,
+        only_inputs=True
+    )[0]
+    geodesic_curvature = torch.norm(torch.cross(tangent_derivative, normal, dim=1), dim=1)
+    return geodesic_curvature

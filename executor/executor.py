@@ -117,8 +117,18 @@ class Executor:
         training_dataloader, validation_dataloader = load_data.load_data(self.data_path,self.config,self.device)     
         # model as follow
         model = self.model
+        # euler characteristict as follow
+        # Define your Euler characteristic as a trainable parameter
+        euler_characteristic = nn.Parameter(torch.tensor(0.0))
         # optimizer as follow
-        optimizer = torch.optim.Adam(model.parameters(), lr=self.config.lr)
+        print(f"Loss function is {self.loss.__name__}")
+        if self.loss.__name__=="GaussBonnetLoss":
+            optimizer = torch.optim.Adam([
+            {'params': model.parameters()},
+            {'params': [euler_characteristic], 'lr': self.config.lr}  # Euler characteristic as a separate parameter
+        ], lr=self.config.lr)
+        else:
+            optimizer = torch.optim.Adam(model.parameters(), lr=self.config.lr)
         # ##################### ADDED FOR TESTING ############################
         scheduler = StepLR(optimizer, step_size=100, gamma=0.1)
         # ####################################################################
@@ -147,7 +157,12 @@ class Executor:
             torch.cuda.empty_cache()
             
             for batch, (x_batch, y_batch) in enumerate(training_dataloader):
-                loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i)
+                # euler_characteristic = torch.tensorint(0)
+                if self.loss.__name__()=="GaussBonnetLoss":
+                    loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i,euler_characteristic)
+                else:
+                    loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i)
+                
                 # if model.__name__=="KAN":
                 #     loss+=model.regularization_loss(1,0)
                 optimizer.zero_grad()
@@ -164,10 +179,15 @@ class Executor:
             loss_per_epoch.append(train_loss)
             model.eval()
             for batch, (x_batch, y_batch) in enumerate(validation_dataloader):
-                loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i)
+                if self.loss.__name__()=="GaussBonnetLoss":
+                    loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i,euler_characteristic)
+                else:
+                    loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i)
                 # if model.__name__=="KAN":
                 #     loss+=model.regularization_loss(1,0)
                 val_loss += loss.item()
+                del x_batch
+                del y_batch
             val_loss = val_loss/len(validation_dataloader)
             val_loss_per_epoch.append(val_loss)
             model.train()
