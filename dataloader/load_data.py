@@ -24,21 +24,33 @@ def load_data(data_path, config, device):
     # check if the csv exists in the path or not
     # read the csv file if present otherwise create an empty dataframe
 
-
-    df_uniform_points = df_from_csv(os.path.join(save_directory, "uniform.csv"))
-    df_on_surface = df_from_csv(os.path.join(save_directory, "surface.csv"))
-    df_narrow_band = df_from_csv(os.path.join(save_directory, "narrow.csv"))
-    columns = df_uniform_points.columns
-    df_additional = pd.DataFrame(columns=columns)
-    if config.mismatchuse:
-        df_additional = pd.read_csv(os.path.join(data_path, "mismatch.csv"))
+    # get the csv file from the path given as geometry if the config says PCD 
+    if "pcd" in config.name:
+        # print("config.geometry",config.geometry)
+        df_on_surface = df_from_csv(os.path.join(config.geometry))
+        # df_on_surface[]
+        # # print(df_on_surface.head())
+        # exit(1)
+        columns = df_on_surface.columns
+        df_additional = pd.DataFrame(columns=columns)
+        df_uniform_points  = pd.DataFrame(columns=columns)
+        df_narrow_band = pd.DataFrame(columns=columns)
+    else:
+        df_uniform_points = df_from_csv(os.path.join(save_directory, "uniform.csv"))
+        df_on_surface = df_from_csv(os.path.join(save_directory, "surface.csv"))
+        df_narrow_band = df_from_csv(os.path.join(save_directory, "narrow.csv"))
+        columns = df_uniform_points.columns
+        df_additional = pd.DataFrame(columns=columns)
+        if config.mismatchuse:
+            df_additional = pd.read_csv(os.path.join(data_path, "mismatch.csv"))
 
     # Create a list of data frames to concatenate, subject to the condition
     dfs_to_concat = [df for df in [df_uniform_points, df_on_surface, df_narrow_band, df_additional] if len(df) > 1]
 
     # Concatenate the data frames in the list if there are more than one
     df = pd.concat(dfs_to_concat, ignore_index=True)
-    df = df.drop(columns=["Unnamed: 0"])
+    if not "pcd" in config.name:
+        df = df.drop(columns=["Unnamed: 0"])
 
     total_points = len(df)
     if total_points < 1000:
@@ -48,7 +60,9 @@ def load_data(data_path, config, device):
 
     feature_columns = df.columns[0:-4]
     target_column = df.columns[-4:]
-
+    if "pcd" in config.name:
+        feature_columns = ['x', 'y', 'z']
+        target_column = []
     print("traint_test_split_value", config.train_test_split)
     print(df[feature_columns].shape)
     print(df[target_column].shape)

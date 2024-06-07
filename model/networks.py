@@ -77,7 +77,7 @@ class ImplicitNet(nn.Module):
             setattr(self, "lin" + str(layer), lin)
 
         if beta > 0:
-            self.activation = nn.Softplus(beta=beta,threshold=0)
+            self.activation = nn.Softplus(beta=beta)
 
         else:
             self.activation = nn.ReLU()
@@ -101,7 +101,8 @@ class ImplicitNet(nn.Module):
             if layer < self.num_layers - 2:
                 x = self.activation(x)
             # save each layer into npy files 
-            
+            elif isinstance(self.activation, nn.ReLU):  # If the activation is ReLU
+                x = torch.tanh(x)  #
         return x
     # normalization for lipsitch implementation 
     # not tested for this project
@@ -487,3 +488,4 @@ class KAN(torch.nn.Module):
         )
     def __name__(self):
         return "KAN"
+

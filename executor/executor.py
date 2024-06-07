@@ -57,6 +57,8 @@ class Executor:
         self.loss = self.config.loss
         print("\nExecutor initialized\n")
     def rescale(self):
+        # rescale the geometry to fit in the unit cube
+        print("Rescaling the geometry")
         self.rescaled_path=os.path.join(self.main_path,self.geometry_name+"_rescaled.stl")
         # if the rescaled file exists then use that
         if not os.path.exists(self.rescaled_path):
@@ -83,6 +85,8 @@ class Executor:
         return self.rescaled_path
     def sampling(self):
         # if not self.config.continue_sampling:
+        if "pcd" in self.config.name:
+            return
         if not self.config.two_dim:
             geometry_path = self.config.geometry if not self.config.rescale else self.rescale()
         else:
@@ -97,6 +101,7 @@ class Executor:
            print("Sampling done")
            return
         else:
+            print("geometry_path",geometry_path)
             df_uniform_points,df_on_surface,df_narrow_band = data_generator.generate_signed_distance_data(geometry_path,self.config.uniform_points,self.config.surface,self.config.narrowband,self.config.narrowband_width)
             # save the dataframes to CSV
             df_uniform_points.to_csv(os.path.join(self.data_path,"uniform.csv"))
@@ -120,12 +125,13 @@ class Executor:
         # euler characteristict as follow
         # Define your Euler characteristic as a trainable parameter
         euler_characteristic = nn.Parameter(torch.tensor(0.0))
-        # optimizer as follow
+
+        # use optimizer according to the loss function
         print(f"Loss function is {self.loss.__name__}")
-        if self.loss.__name__=="GaussBonnetLoss":
+        if self.loss.__name__()=="GaussBonnetLoss":
             optimizer = torch.optim.Adam([
             {'params': model.parameters()},
-            {'params': [euler_characteristic], 'lr': self.config.lr}  # Euler characteristic as a separate parameter
+            {'params': [euler_characteristic]}  # Euler characteristic as a separate parameter
         ], lr=self.config.lr)
         else:
             optimizer = torch.optim.Adam(model.parameters(), lr=self.config.lr)
@@ -149,46 +155,47 @@ class Executor:
         model = model.train()
 
         counter = 0
-
+        loss_fn = self.loss
+        torch.autograd.set_detect_anomaly(True)
+        optimizer = torch.optim.Adam(model.parameters(), lr=self.config.lr)
         for i in range(start_epoch, int(self.config.epochs)):
             loss=0
             train_loss = 0
             val_loss = 0
             torch.cuda.empty_cache()
-            
+
             for batch, (x_batch, y_batch) in enumerate(training_dataloader):
-                # euler_characteristic = torch.tensorint(0)
-                if self.loss.__name__()=="GaussBonnetLoss":
-                    loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i,euler_characteristic)
-                else:
-                    loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i)
-                
-                # if model.__name__=="KAN":
-                #     loss+=model.regularization_loss(1,0)
                 optimizer.zero_grad()
+                # euler_characteristic = torch.tensorint(0)
+                # if self.loss.__name__()=="GaussBonnetLoss":
+
+                #     loss = loss_fn(x_batch.to(self.device), y_batch.to(self.device), model,i,torch.round(euler_characteristic))
+                # else:
+                loss = loss_fn(x_batch.to(self.device), y_batch.to(self.device), model,i)
+                
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
                 del x_batch
                 del y_batch
-
+                exit(1)
             # take a step in the scheduler
-            scheduler.step()
+            # scheduler.step()
             torch.cuda.empty_cache()
             train_loss = train_loss/len(training_dataloader)
             loss_per_epoch.append(train_loss)
-            model.eval()
-            for batch, (x_batch, y_batch) in enumerate(validation_dataloader):
-                if self.loss.__name__()=="GaussBonnetLoss":
-                    loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i,euler_characteristic)
-                else:
-                    loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i)
-                # if model.__name__=="KAN":
-                #     loss+=model.regularization_loss(1,0)
-                val_loss += loss.item()
-                del x_batch
-                del y_batch
-            val_loss = val_loss/len(validation_dataloader)
+            # model.eval()
+            # for batch, (x_batch, y_batch) in enumerate(validation_dataloader):
+            #     if self.loss.__name__()=="GaussBonnetLoss":
+            #         loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i,euler_characteristic)
+            #     else:
+            #         loss = self.loss(x_batch.to(self.device), y_batch.to(self.device), model,i)
+            #     # if model.__name__=="KAN":
+            #     #     loss+=model.regularization_loss(1,0)
+            #     val_loss += loss.item()
+            #     del x_batch
+            #     del y_batch
+            val_loss = train_loss
             val_loss_per_epoch.append(val_loss)
             model.train()
 
@@ -198,6 +205,7 @@ class Executor:
                 f.write(str_to_write)
             if i%self.config.checkpointing==0:
                 print(str_to_write)
+                # print(f"\n Euler Characterisiticts is {euler_characteristic.item()}\n")
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 counter = 0
@@ -472,7 +480,9 @@ class Executor:
         # plt.savefig(path_to_save)
     def run(self):
         print("Running the executor")
-        if self.config.samplingonly:
+        # get the name of the loss function
+        loss_name = self.config.loss.__name__()
+        if self.config.samplingonly and not loss_name=="IGRLOSSPCD":
             print("Sampling only")
             self.sampling()
             return        # inside the train_path create a folder to save the  plots

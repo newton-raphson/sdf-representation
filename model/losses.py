@@ -108,7 +108,9 @@ class IGRLOSS(nn.Module):
         # y, y_predicted,model,inputs,true_surface_normal,epoch,surface_normal
     def forward(self, x_batch,y_batch,model,epoch):
         # Apply the clamp operation to predicted and target SDF values
-        
+        print("X_batch",x_batch.shape)
+        print("Y_batch",y_batch.shape)
+        # print all the 
         predicted_sdf = torch.clamp(model(x_batch), -self.delta, self.delta)
         target_sdf = torch.clamp(y_batch[:,0], -self.delta, self.delta)
 
@@ -133,7 +135,54 @@ class IGRLOSS(nn.Module):
 
         total_loss = loss.mean() +  self.tau*regularizer_loss.mean() + self.lambda_g*gradient_loss.mean()
         return total_loss
-    
+class IGRLOSSPCD(nn.Module):
+    # delta is the threshold value which is used to clamp the predicted and target SDF values
+    # tau is the regularizer weight, regularization is the normal similarity (less rigorous then the direct normal loss)
+    # lambda_g is the weight for the eikonal loss
+    def __init__(self,delta=0.1, tau=1, lambda_g=0.1,regularizer_threshold=1,local_sigma=0.01,global_sigma=0.1):
+        super(IGRLOSSPCD, self).__init__()
+        self.delta = delta
+        self.tau = tau ###normal_lambda
+        self.lambda_g = lambda_g ###normal_lambda eikonal
+        self.regularizer_threshold= regularizer_threshold
+        self.local_sigma = local_sigma
+        self.global_sigma = global_sigma
+    def __name__(self):
+        return "IGRLOSSPCD"
+        # y, y_predicted,model,inputs,true_surface_normal,epoch,surface_normal
+    def forward(self, x_batch,y_batch,model,epoch):
+        # Apply the clamp operation to predicted and target SDF values
+        
+        predicted_sdf = model(x_batch)
+
+        # calculate the mnfld loss
+        loss = (predicted_sdf)**2
+        loss = loss.mean()
+
+        non_mnfld_points = self.get_points(x_batch)
+        surface_normal = compute_normal(model, x_batch)
+        gradient_norm = surface_normal.norm(2,dim=-1) 
+
+        # compute the eikonol loss
+        non_mnfld_loss = ((gradient_norm-1)**2).mean()
+        
+
+        return loss + self.lambda_g*non_mnfld_loss
+        
+        return total_loss
+    def get_points(self, pc_input, local_sigma=None):
+
+        sample_size, dim = pc_input.shape
+
+        if local_sigma is not None:
+            sample_local = pc_input + (torch.randn_like(pc_input) * local_sigma.unsqueeze(-1))
+        else:
+            sample_local = pc_input + (torch.randn_like(pc_input) * self.local_sigma)
+
+        sample_global = (torch.rand(sample_size // 8, dim, device=pc_input.device) * (self.global_sigma * 2)) - self.global_sigma
+
+        sample = torch.cat([sample_local, sample_global], dim=0)
+        return sample
 class RegularizedCustomSDFLoss(nn.Module):
     def __init__(self, delta,threshold=1):
         super(RegularizedCustomSDFLoss, self).__init__()
@@ -177,27 +226,51 @@ class GaussBonnetLoss(nn.Module):
         gradient_norm = surface_normal.norm(2, dim=-1)
         true_surface_normal = y_batch[:, 1:].view(-1, 3)
         surface_normal = surface_normal.view(-1, 3)
+        
+        # gaussian curvature for gauss-bonnet loss
+        gaussian_curvature = compute_gaussian_curvature(model, x_batch)
 
         regularizer_loss = torch.where(
             target_sdf.abs() < self.regularizer_threshold,
-            (1 - torch.nn.functional.cosine_similarity(true_surface_normal, surface_normal / surface_normal.norm(), dim=-1)) ** 2,
-            1e-8 * torch.ones_like(loss)
+            self.tau*(1 - torch.nn.functional.cosine_similarity(true_surface_normal, surface_normal))**2+
+            self.lambda_g*(gradient_norm - 1) ** 2+
+            self.gauss_bonnet_weight* (gaussian_curvature- 2 * torch.pi * euler_characteristic)**2,
+            1e-8*torch.ones_like(loss)
         )
+        
 
-        gradient_loss = torch.where(
-            target_sdf.abs() < self.regularizer_threshold,
-            (gradient_norm - 1) ** 2,
-            1e-8 * torch.ones_like(loss)
-        )
 
-        gauss_bonnet_loss = self.compute_gauss_bonnet_loss(x_batch, model, euler_characteristic)
 
-        total_loss = loss.mean() + self.tau * regularizer_loss.mean() + self.lambda_g * gradient_loss.mean() + self.gauss_bonnet_weight * gauss_bonnet_loss.mean()
+
+        # gradient_loss = torch.where(
+        #     target_sdf.abs() < self.regularizer_threshold,
+        #     (gradient_norm - 1) ** 2,
+        #     1e-8 * torch.ones_like(loss)
+        # )
+
+        # compute the gauss bonnet loss just using the curvature
+
+        # # find which of the loss among the above is nan
+        # if torch.isnan(gradient_loss).any():
+        #     print("Gradient loss is nan")
+        #     exit(0)
+        # if torch.isnan(regularizer_loss).any():
+        #     print("Regularizer loss is nan")
+        #     exit(0)
+        # if torch.isnan(loss).any():
+        #     print("Loss is nan")
+        #     exit(0)
+        total_loss = loss.mean() +  regularizer_loss.mean()
+        # if(epoch>5):
+        #     print("USING BONNET LOSS")
+        #     gauss_bonnet_loss = self.compute_gauss_bonnet_loss(x_batch, model, euler_characteristic)
+        #     total_loss += self.gauss_bonnet_weight * gauss_bonnet_loss.mean()
+
         return total_loss
 
     def compute_gauss_bonnet_loss(self, x_batch, model, euler_characteristic):
         gaussian_curvature = compute_gaussian_curvature(model, x_batch)
-        geodesic_curvature = compute_geodesic_curvature(model, x_batch)
+
 
         sdf = model(x_batch)
         surface_mask = torch.abs(sdf) < self.regularizer_threshold
@@ -221,7 +294,6 @@ def compute_normal(model, pj):
         retain_graph=True,
         only_inputs=True)[0][:, -3:]
     return points_grad
-
 def compute_hessian(model, points):
     points.requires_grad = True
     sdf_values = model(points)
@@ -265,26 +337,34 @@ def compute_gaussian_curvature(model, points):
     hessian_determinant = torch.det(hessian)
     gaussian_curvature = hessian_determinant / (1 + gradient_norm**2)**2
     return gaussian_curvature
-def compute_tangent(normal):
-    if torch.allclose(normal[:, -1], torch.zeros_like(normal[:, -1])):
-        fixed_vector = torch.tensor([0, 1, 0], device=normal.device, dtype=normal.dtype)
-    else:
-        fixed_vector = torch.tensor([0, 0, 1], device=normal.device, dtype=normal.dtype)
-    tangent = torch.cross(normal, fixed_vector.unsqueeze(0).repeat(normal.size(0), 1))
-    tangent = tangent / tangent.norm(dim=1, keepdim=True)
-    return tangent
-def compute_geodesic_curvature(model, points):
-    normal = compute_gradient(model, points)
-    normal = normal / normal.norm(dim=1, keepdim=True)
-    tangent = compute_tangent(normal)
-    # tangent.requires_grad = True
-    tangent_derivative = torch.autograd.grad(
-        outputs=tangent,
-        inputs=points,
-        grad_outputs=torch.ones_like(tangent),
-        create_graph=True,
-        retain_graph=True,
-        only_inputs=True
-    )[0]
-    geodesic_curvature = torch.norm(torch.cross(tangent_derivative, normal, dim=1), dim=1)
-    return geodesic_curvature
+# def compute_tangent(normal):
+#     if torch.allclose(normal[:, -1], torch.zeros_like(normal[:, -1])):
+#         fixed_vector = torch.tensor([0, 1, 0], device=normal.device, dtype=normal.dtype)
+#     else:
+#         fixed_vector = torch.tensor([0, 0, 1], device=normal.device, dtype=normal.dtype)
+#     tangent = torch.cross(normal, fixed_vector.unsqueeze(0).repeat(normal.size(0), 1))
+#     tangent = tangent / tangent.norm(dim=1, keepdim=True)
+#     return tangent
+# def compute_geodesic_curvature(model, points):
+#     normal = compute_gradient(model, points)
+#     normal = normal.norm(2,dim=-1).view(-1,3) 
+#     tangent = compute_tangent(normal)
+#     # find which is nan here
+#     if torch.isnan(normal).any():
+#         print("Normal is nan")
+#         exit(0)
+#     if torch.isnan(tangent).any():
+#         print("Tangent is nan")
+#         exit(0)
+
+#     # tangent.requires_grad = True
+#     tangent_derivative = torch.autograd.grad(
+#         outputs=tangent,
+#         inputs=points,
+#         grad_outputs=torch.ones_like(tangent),
+#         create_graph=True,
+#         retain_graph=True,
+#         only_inputs=True
+#     )[0]
+#     geodesic_curvature = torch.norm(torch.cross(tangent_derivative, normal, dim=1), dim=1)
+#     return geodesic_curvature

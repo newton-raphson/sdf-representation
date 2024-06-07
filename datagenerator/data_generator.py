@@ -824,6 +824,7 @@ def generate_signed_distance_data(geometry,num_points_uniform, num_points_surfac
     - df_narrow_band (pandas.DataFrame): DataFrame containing signed distance values for points sampled in the narrow band region of the mesh.
     """
     # Load the mesh
+    print(geometry)
     mesh = trimesh.load(geometry)
 
     # # Check if mesh is within bounds
@@ -839,16 +840,11 @@ def generate_signed_distance_data(geometry,num_points_uniform, num_points_surfac
 
     query_uniform_points = np.random.uniform(-1, 1, size=(int(points_inside_box), 3))
     print("uniform points generated")
-    if distributed:
-        min_value = np.min(np.min(mesh.vertices, axis=0))*1.1
-        max_value = np.max(np.max(mesh.vertices, axis=0))*1.1
-        query_uniform_points = np.random.uniform(min_value, max_value, size=(int(points_inside_box), 3))
-    # Calculate mean curvature for each triangle
-    # triangle_mean_curvature = calculate_mean_curvature(mesh, v,f, 0.1)
+    # if distributed:
+    #     min_value = np.min(np.min(mesh.vertices, axis=0))*1.1
+    #     max_value = np.max(np.max(mesh.vertices, axis=0))*1.1
+    #     query_uniform_points = np.random.uniform(min_value, max_value, size=(int(points_inside_box), 3))
 
-    # # Define adaptive sampling factor based on mean curvature
-    # sampling_det = triangle_mean_curvature > np.mean(triangle_mean_curvature) 
-    # Sample points
 
     query_on_surface = []
     query_narrow_band = []
@@ -910,8 +906,6 @@ def generate_signed_distance_data(geometry,num_points_uniform, num_points_surfac
         return df
     df_on_surface = write_signed_distance(query_on_surface, v, f,"surface")
     df_uniform_points = write_signed_distance(query_uniform_points, v, f,"uniform")
-    # print("uniform points generated and signed distance computed")
-    # df_on_surface = write_signed_distance(query_on_surface, v, f,"surface")
     df_narrow_band = write_signed_distance(query_narrow_band, v, f,"narrow_band")
     return df_uniform_points, df_on_surface, df_narrow_band
 
